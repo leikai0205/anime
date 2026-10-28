@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的動漫進度管理系統</title>
+    <style>
+        :root {
+            --bg-color: #07090e;        /* 4K 劇院級極黑深色背景 */
+            --card-bg: #111827;         /* 質感高冷深藍灰卡片 */
+            --card-hover: #1f2937;      /* 卡片 hover 微亮 */
+            --border-color: #1f2937;    /* 精緻邊框色 */
+            --text-main: #f3f4f6;       /* 主文字高亮白 */
+            --text-sub: #9ca3af;        /* 次要文字銀灰 */
+            --accent-color: #38bdf8;    /* 科技感天空藍 */
+            --today-border: #f43f5e;    /* 今日專屬玫瑰紅 */
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 30px 20px;
+            display: flex;
+            flex-direction: column;
+            min-height: 90vh;
+        }
+        header { 
+            text-align: center; 
+            margin-bottom: 30px; 
+        }
+        header h1 { 
+            color: var(--text-main); 
+            font-weight: 600;
+            letter-spacing: 1px;
+            font-size: 1.8rem;
+            margin: 0;
+            text-shadow: 0 2px 10px rgba(56, 189, 248, 0.2);
+        }
+
+        /* 控制列：選單與搜尋列 (置中優雅排版) */
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 40px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        select, .search-input {
+            background-color: var(--card-bg);
+            color: var(--text-main);
+            border: 1px solid #374151;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            outline: none;
+            transition: all 0.25s ease;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+        }
+        select:hover, .search-input:hover {
+            border-color: #4b5563;
+        }
+        select:focus, .search-input:focus { 
+            border-color: var(--accent-color); 
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.15);
+        }
+        .search-input {
+            width: 300px;
+        }
+
+        /* 搜尋結果模式的季節標題提示 */
+        .search-season-title {
+            width: 100%;
+            font-size: 1.1rem;
+            color: var(--accent-color);
+            border-bottom: 1px solid #374151;
+            padding-bottom: 8px;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            font-weight: 500;
+        }
+
+        /* 4K 垂直流暢單欄佈局 */
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            flex-grow: 1;
+            width: 100%;
+        }
+        
+        /* 每一天的欄位：區塊化設計 */
+        .day-column {
+            background-color: var(--card-bg);
+            border-radius: 14px;
+            padding: 20px 24px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-color);
+            transition: transform 0.2s ease;
+        }
+
+        /* 如果今天是當天，給予極具質感的特殊紅調邊框與微光 */
+        .day-column.is-today {
+            border: 1px solid var(--today-border);
+            box-shadow: 0 10px 30px -5px rgba(244, 63, 94, 0.15);
+            background: linear-gradient(145deg, #111827 0%, #161b22 100%);
+        }
+
+        .day-header {
+            font-size: 1.15rem;
+            font-weight: 600;
+            padding-bottom: 12px;
+            margin-bottom: 16px;
+            border-bottom: 1px solid #27303f;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #e5e7eb;
+        }
+
+        .day-column.is-today .day-header {
+            border-bottom-color: rgba(244, 63, 94, 0.3);
+            color: #fb7185;
+        }
+
+        .today-badge {
+            background-color: var(--today-border);
+            color: white;
+            font-size: 0.75rem;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+
+        /* 動漫清單格狀排列 */
+        .anime-list { 
+            list-style: none; 
+            padding: 0; 
+            margin: 0; 
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 12px; 
+        }
+
+        .anime-item {
+            background-color: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            padding: 12px 16px;
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            transition: background-color 0.2s ease;
+        }
+        .anime-item:hover {
+            background-color: rgba(255, 255, 255, 0.04);
+            border-color: rgba(255, 255, 255, 0.08);
+        }
+
+        .anime-title { 
+            font-size: 0.9rem; 
+            line-height: 1.4; 
+            flex-grow: 1; 
+            color: var(--text-main);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+        .anime-title:hover {
+            color: var(--accent-color);
+            text-decoration: underline;
+        }
+        
+        /* 集數手動輸入框 */
+        .ep-input-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+        .ep-input-wrapper span {
+            font-size: 0.8rem;
+            color: var(--text-sub);
+        }
+        .ep-input {
+            width: 50px;
+            background-color: #030712;
+            border: 1px solid #374151;
+            color: white;
+            text-align: center;
+            padding: 6px 4px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            transition: border-color 0.2s;
+        }
+        .ep-input:focus {
+            border-color: var(--accent-color);
+            outline: none;
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.2);
+        }
+
+        /* 頁尾樣式 */
+        footer {
+            text-align: center;
+            margin-top: 50px;
+            padding-top: 20px;
+            border-top: 1px solid #1f2937;
+            color: var(--text-sub);
+            font-size: 0.85rem;
+        }
+        footer a {
+            color: var(--accent-color);
+            text-decoration: none;
+        }
+        footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>🎬 我的動漫進度管理系統</h1>
+    </header>
+
+    <!-- 控制列：年份、季節選單 與 搜尋輸入框 -->
+    <div class="controls">
+        <select id="yearSelect" onchange="handleControlChange()">
+            <!-- JS 自動產生目前年份到 2017 -->
+        </select>
+        <select id="seasonSelect" onchange="handleControlChange()">
+            <option value="冬">冬番 (1-3月)</option>
+            <option value="春">春番 (4-6月)</option>
+            <option value="夏">夏番 (7-9月)</option>
+            <option value="秋">秋番 (10-12月)</option>
+        </select>
+        <input type="text" id="searchInput" class="search-input" placeholder="🔍 輸入動漫名稱全站搜尋..." oninput="handleSearch()">
+    </div>
+
+    <div class="container" id="animeContainer">
+        <p style="text-align: center; grid-column: 1/-1; color: var(--text-sub);">正在載入資料...</p>
+    </div>
+
+    <!-- 頁尾來源標註 -->
+    <footer>
+        資料參考與引用自 <a href="https://anime1.me/" target="_blank">Anime1.me</a> 及其它公開資訊
+    </footer>
+
+    <script>
+        // 1. 自動判定目前的年份與季節
+        function getDefaultYearAndSeason() {
+            const now = new Date();
+            const currentYear = now.getFullYear();
+            const currentMonth = now.getMonth() + 1;
+
+            let currentSeason = "冬";
+            if (currentMonth >= 4 && currentMonth <= 6) {
+                currentSeason = "春";
+            } else if (currentMonth >= 7 && currentMonth <= 9) {
+                currentSeason = "夏";
+            } else if (currentMonth >= 10 && currentMonth <= 12) {
+                currentSeason = "秋";
+            } else {
+                currentSeason = "冬";
+            }
+
+            return { year: currentYear.toString(), season: currentSeason };
+        }
+
+        // 初始化選單
+        const defaultInfo = getDefaultYearAndSeason();
+        const yearSelect = document.getElementById('yearSelect');
+        const seasonSelect = document.getElementById('seasonSelect');
+
+        const currentRealYear = new Date().getFullYear();
+        for (let y = currentRealYear; y >= 2017; y--) {
+            let opt = document.createElement('option');
+            opt.value = y;
+            opt.innerText = y + " 年";
+            if(y.toString() === defaultInfo.year) {
+                opt.selected = true;
+            }
+            yearSelect.appendChild(opt);
+        }
+
+        seasonSelect.value = defaultInfo.season;
+
+        let rawDatabase = {};
+
+        // 從你的 Apps Script 抓取完整資料
+        async function fetchSheetData() {
+            const API_URL = "https://script.google.com/macros/s/AKfycbxDVeHWef6lwyEPUYavbJIGppFaJFL5IcirCcpoX1rifNDJD9WP4opQZnYvMGHnixQS/exec";
+            try {
+                const response = await fetch(API_URL);
+                rawDatabase = await response.json();
+                updateView();
+            } catch (error) {
+                document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法載入資料，請確認網路連線或 Apps Script 部署狀態。</p>';
+            }
+        }
+
+        // 當選單變更時觸發
+        function handleControlChange() {
+            document.getElementById('searchInput').value = "";
+            updateView();
+        }
+
+        // 取得動態排序的星期陣列（以今天為第一天）
+        function getOrderedDays() {
+            const allDays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
+            const todayIndex = new Date().getDay();
+            
+            let ordered = [];
+            for (let i = 0; i < 7; i++) {
+                ordered.push(allDays[(todayIndex + i) % 7]);
+            }
+            return ordered;
+        }
+
+        // 一般選單檢視模式
+        function updateView() {
+            const year = yearSelect.value;
+            const seasonKey = seasonSelect.value;
+            
+            let matchedSeasonName = "";
+            for (let sName in rawDatabase) {
+                if (sName.includes(year) && sName.includes(seasonKey)) {
+                    matchedSeasonName = sName;
+                    break;
+                }
+            }
+
+            const seasonData = matchedSeasonName ? rawDatabase[matchedSeasonName] : null;
+            renderNormal(year, seasonKey, matchedSeasonName, seasonData);
+        }
+
+        // 渲染一般分類檢視（改用純淨的雜湊編碼 Key，絕對不會有特殊符號跑版問題）
+        function renderNormal(year, seasonKey, matchedSeasonName, seasonData) {
+            const container = document.getElementById('animeContainer');
+            const orderedDays = getOrderedDays();
+            const todayName = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][new Date().getDay()];
+
+            container.innerHTML = "";
+            
+            orderedDays.forEach(dayName => {
+                const animeList = seasonData && seasonData[dayName] ? seasonData[dayName] : [];
+                const isToday = (dayName === todayName);
+
+                let htmlList = animeList.map((anime, index) => {
+                    // 🎯 採用絕對不會出錯的乾淨 Key（季節 + 星期 + 該項目的流水編號）
+                    const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
+                    const storageKey = `ep_${matchedSeasonName}_${dayName}_${index}_${safeKeyName}`;
+                    const savedEp = localStorage.getItem(storageKey) || "";
+                    
+                    const titleHtml = anime.link 
+                        ? `<a href="${anime.link}" target="_blank" class="anime-title">${anime.title}</a>`
+                        : `<span class="anime-title">${anime.title}</span>`;
+
+                    return `
+                        <div class="anime-item">
+                            ${titleHtml}
+                            <div class="ep-input-wrapper">
+                                <span>第</span>
+                                <input type="number" class="ep-input" value="${savedEp}" placeholder="-" 
+                                    oninput="saveProgress('${storageKey}', this.value)">
+                                <span>集</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                container.innerHTML += `
+                    <div class="day-column ${isToday ? 'is-today' : ''}">
+                        <div class="day-header">
+                            <span>${dayName} (${animeList.length}部)</span>
+                            ${isToday ? '<span class="today-badge">🔥 今日</span>' : ''}
+                        </div>
+                        <ul class="anime-list">${animeList.length > 0 ? htmlList : '<p style="color:var(--text-sub); font-size:0.85rem; text-align:center; margin:15px 0; grid-column: 1/-1;">此季度尚無資料</p>'}</ul>
+                    </div>
+                `;
+            });
+        }
+
+        // 全站即時搜尋功能
+        function handleSearch() {
+            const keyword = document.getElementById('searchInput').value.trim().toLowerCase();
+            const container = document.getElementById('animeContainer');
+
+            if (!keyword) {
+                updateView();
+                return;
+            }
+
+            container.innerHTML = "";
+            let matchCount = 0;
+
+            for (let seasonName in rawDatabase) {
+                const seasonObj = rawDatabase[seasonName];
+                
+                let matchedItems = [];
+                for (let day in seasonObj) {
+                    seasonObj[day].forEach((anime, idx) => {
+                        if (anime.title.toLowerCase().includes(keyword)) {
+                            matchedItems.push({ ...anime, day: day, idx: idx });
+                        }
+                    });
+                }
+
+                if (matchedItems.length > 0) {
+                    matchCount++;
+                    
+                    let seasonTitleDiv = document.createElement('div');
+                    seasonTitleDiv.className = 'search-season-title';
+                    seasonTitleDiv.innerText = `📂 ${seasonName} (找到 ${matchedItems.length} 部)`;
+                    container.appendChild(seasonTitleDiv);
+
+                    let resultsDiv = document.createElement('div');
+                    resultsDiv.style.width = "100%";
+                    resultsDiv.style.display = "grid";
+                    resultsDiv.style.gridTemplateColumns = "repeat(auto-fill, minmax(260px, 1fr))";
+                    resultsDiv.style.gap = "12px";
+                    resultsDiv.style.marginBottom = "20px";
+
+                    let htmlList = matchedItems.map(anime => {
+                        const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
+                        const storageKey = `ep_${seasonName}_${anime.day}_${anime.idx}_${safeKeyName}`;
+                        const savedEp = localStorage.getItem(storageKey) || "";
+                        
+                        const titleHtml = anime.link 
+                            ? `<a href="${anime.link}" target="_blank" class="anime-title">${anime.title}</a>`
+                            : `<span class="anime-title">${anime.title}</span>`;
+
+                        return `
+                            <div class="anime-item">
+                                <div style="flex-grow:1; display:flex; flex-direction:column; gap:4px;">
+                                    ${titleHtml}
+                                    <span style="font-size: 0.75rem; color: var(--accent-color);">📅 ${anime.day}</span>
+                                </div>
+                                <div class="ep-input-wrapper">
+                                    <span>第</span>
+                                    <input type="number" class="ep-input" value="${savedEp}" placeholder="-" 
+                                        oninput="saveProgress('${storageKey}', this.value)">
+                                    <span>集</span>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+
+                    resultsDiv.innerHTML = htmlList;
+                    container.appendChild(resultsDiv);
+                }
+            }
+
+            if (matchCount === 0) {
+                container.innerHTML = `<p style="text-align: center; color: var(--text-sub); margin-top: 40px;">找不到與「${keyword}」相關的動漫作品。</p>`;
+            }
+        }
+
+        // 即時儲存進度到該裝置
+        function saveProgress(key, val) {
+            if(val === "") {
+                localStorage.removeItem(key);
+            } else {
+                localStorage.setItem(key, val);
+            }
+        }
+
+        // 啟動載入
+        fetchSheetData();
+    </script>
+</body>
+</html>
