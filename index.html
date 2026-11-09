@@ -290,22 +290,35 @@
         seasonSelect.value = defaultInfo.season;
 
         let rawDatabaseAuto = {};
-        let rawDatabaseManual = {};
+        let rawDatabaseManual = null; // 採按需載入（秒開優化）
 
-        // 從你的 Apps Script 抓取完整資料（包含自動抓取與手動備份）
+        // 從你的 Apps Script 僅抓取「自動抓取動漫」以實現秒開
         async function fetchSheetData() {
             const API_URL = "https://script.google.com/macros/s/AKfycbxDVeHWef6lwyEPUYavbJIGppFaJFL5IcirCcpoX1rifNDJD9WP4opQZnYvMGHnixQS/exec";
             try {
                 const response = await fetch(API_URL);
                 const result = await response.json();
                 
-                rawDatabaseAuto = result.auto || {};
-                rawDatabaseManual = result.manual || {};
-                
+                rawDatabaseAuto = result.auto ? result.auto : result; 
                 updateView();
             } catch (error) {
                 document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法載入資料，請確認網路連線或 Apps Script 部署狀態。</p>';
             }
+        }
+
+        // 當需要時（自動區找不到該季），才在背景載入「每季動漫」手動備份區
+        async function ensureManualLoaded() {
+            if (rawDatabaseManual !== null) return rawDatabaseManual;
+            
+            const API_URL = "https://script.google.com/macros/s/AKfycbxDVeHWef6lwyEPUYavbJIGppFaJFL5IcirCcpoX1rifNDJD9WP4opQZnYvMGHnixQS/exec?type=manual";
+            try {
+                const response = await fetch(API_URL);
+                const result = await response.json();
+                rawDatabaseManual = result.manual ? result.manual : {};
+            } catch (e) {
+                rawDatabaseManual = {};
+            }
+            return rawDatabaseManual;
         }
 
         // 當選單變更時觸發
@@ -326,15 +339,15 @@
             return ordered;
         }
 
-        // 一般選單檢視模式（具備雙保險容錯機制：優先抓自動抓取區，無資料則切換手動備份區）
-        function updateView() {
+        // 一般選單檢視模式
+        async function updateView() {
             const year = yearSelect.value;
             const seasonKey = seasonSelect.value;
             
             let matchedSeasonName = "";
             let seasonData = null;
 
-            // 1. 優先尋找「自動抓取區 (Auto)」
+            // 1. 優先在「自動抓取區」尋找
             for (let sName in rawDatabaseAuto) {
                 if (sName.includes(year) && sName.includes(seasonKey)) {
                     matchedSeasonName = sName;
@@ -343,12 +356,13 @@
                 }
             }
 
-            // 2. 如果自動抓取區沒有資料，自動切換至「手動備份區 (Manual)」
+            // 2. 如果自動抓取區找不到，才去載入「手動備份區」尋找
             if (!seasonData || Object.keys(seasonData).every(day => seasonData[day].length === 0)) {
-                for (let sName in rawDatabaseManual) {
+                const manualDb = await ensureManualLoaded();
+                for (let sName in manualDb) {
                     if (sName.includes(year) && sName.includes(seasonKey)) {
                         matchedSeasonName = sName + " (手動備份)";
-                        seasonData = rawDatabaseManual[sName];
+                        seasonData = manualDb[sName];
                         break;
                     }
                 }
@@ -357,7 +371,7 @@
             renderNormal(year, seasonKey, matchedSeasonName, seasonData);
         }
 
-        // 渲染一般分類檢視
+        // 渲染一般分類檢視（已修復：使用穩定的年份+季節代號作為儲存 Key，絕不因文字變動而消失）
         function renderNormal(year, seasonKey, matchedSeasonName, seasonData) {
             const container = document.getElementById('animeContainer');
             const orderedDays = getOrderedDays();
@@ -370,8 +384,9 @@
                 const isToday = (dayName === todayName);
 
                 let htmlList = animeList.map((anime, index) => {
+                    // 🛡️ 關鍵修復：強制將 Key 簡化為「年份_季節_星期_動漫名稱」，確保前後端名稱不一致時，集數依然找得到！
                     const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
-                    const storageKey = `ep_${matchedSeasonName}_${dayName}_${index}_${safeKeyName}`;
+                    const storageKey = `ep_${year}_${seasonKey}_${dayName}_${safeKeyName}`;
                     const savedEp = localStorage.getItem(storageKey) || "";
                     
                     const titleHtml = anime.link 
@@ -403,8 +418,8 @@
             });
         }
 
-        // 全站即時搜尋功能（合併 Auto 與 Manual 搜尋）
-        function handleSearch() {
+        // 全站即時搜尋功能
+        async function handleSearch() {
             const keyword = document.getElementById('searchInput').value.trim().toLowerCase();
             const container = document.getElementById('animeContainer');
 
@@ -413,20 +428,33 @@
                 return;
             }
 
+            container.innerHTML = '<p style="text-align: center; color: var(--text-sub);">正在全站搜尋...</p>';
+
+            const manualDb = await ensureManualLoaded();
+            const combinedDatabases = { ...manualDb, ...rawDatabaseAuto };
+
             container.innerHTML = "";
             let matchCount = 0;
-
-            // 綜合搜尋兩邊的資料庫
-            const combinedDatabases = { ...rawDatabaseManual, ...rawDatabaseAuto };
 
             for (let seasonName in combinedDatabases) {
                 const seasonObj = combinedDatabases[seasonName];
                 
+                // 從季節名稱中抽取出年份與季節代號用於 Key 對應
+                let extractedYear = "2026";
+                let extractedSeason = "秋";
+                for(let y = 2017; y <= 2030; y++) {
+                    if(seasonName.includes(y)) extractedYear = y.toString();
+                }
+                if(seasonName.includes("冬")) extractedSeason = "冬";
+                if(seasonName.includes("春")) extractedSeason = "春";
+                if(seasonName.includes("夏")) extractedSeason = "夏";
+                if(seasonName.includes("秋")) extractedSeason = "秋";
+
                 let matchedItems = [];
                 for (let day in seasonObj) {
                     seasonObj[day].forEach((anime, idx) => {
                         if (anime.title.toLowerCase().includes(keyword)) {
-                            matchedItems.push({ ...anime, day: day, idx: idx });
+                            matchedItems.push({ ...anime, day: day, year: extractedYear, season: extractedSeason });
                         }
                     });
                 }
@@ -448,7 +476,7 @@
 
                     let htmlList = matchedItems.map(anime => {
                         const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
-                        const storageKey = `ep_${seasonName}_${anime.day}_${anime.idx}_${safeKeyName}`;
+                        const storageKey = `ep_${anime.year}_${anime.season}_${anime.day}_${safeKeyName}`;
                         const savedEp = localStorage.getItem(storageKey) || "";
                         
                         const titleHtml = anime.link 
