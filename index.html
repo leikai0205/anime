@@ -290,35 +290,28 @@
         seasonSelect.value = defaultInfo.season;
 
         let rawDatabaseAuto = {};
-        let rawDatabaseManual = null; // 採按需載入（秒開優化）
+        let rawDatabaseManual = {};
 
-        // 從你的 Apps Script 僅抓取「自動抓取動漫」以實現秒開
+        // 一次抓取兩張表（資料量很小，秒開順暢）
         async function fetchSheetData() {
             const API_URL = "https://script.google.com/macros/s/AKfycbxDVeHWef6lwyEPUYavbJIGppFaJFL5IcirCcpoX1rifNDJD9WP4opQZnYvMGHnixQS/exec";
             try {
                 const response = await fetch(API_URL);
                 const result = await response.json();
                 
-                rawDatabaseAuto = result.auto ? result.auto : result; 
+                // 相容新舊格式
+                if (result.auto) {
+                    rawDatabaseAuto = result.auto || {};
+                    rawDatabaseManual = result.manual || {};
+                } else {
+                    rawDatabaseAuto = result || {};
+                    rawDatabaseManual = {};
+                }
+                
                 updateView();
             } catch (error) {
                 document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法載入資料，請確認網路連線或 Apps Script 部署狀態。</p>';
             }
-        }
-
-        // 當需要時（自動區找不到該季），才在背景載入「每季動漫」手動備份區
-        async function ensureManualLoaded() {
-            if (rawDatabaseManual !== null) return rawDatabaseManual;
-            
-            const API_URL = "https://script.google.com/macros/s/AKfycbxDVeHWef6lwyEPUYavbJIGppFaJFL5IcirCcpoX1rifNDJD9WP4opQZnYvMGHnixQS/exec?type=manual";
-            try {
-                const response = await fetch(API_URL);
-                const result = await response.json();
-                rawDatabaseManual = result.manual ? result.manual : {};
-            } catch (e) {
-                rawDatabaseManual = {};
-            }
-            return rawDatabaseManual;
         }
 
         // 當選單變更時觸發
@@ -339,8 +332,8 @@
             return ordered;
         }
 
-        // 一般選單檢視模式
-        async function updateView() {
+        // 一般選單檢視模式（智慧容錯：優先看自動區，沒有則看手動備份區）
+        function updateView() {
             const year = yearSelect.value;
             const seasonKey = seasonSelect.value;
             
@@ -356,13 +349,12 @@
                 }
             }
 
-            // 2. 如果自動抓取區找不到，才去載入「手動備份區」尋找
+            // 2. 如果自動抓取區找不到，才去「手動備份區」尋找
             if (!seasonData || Object.keys(seasonData).every(day => seasonData[day].length === 0)) {
-                const manualDb = await ensureManualLoaded();
-                for (let sName in manualDb) {
+                for (let sName in rawDatabaseManual) {
                     if (sName.includes(year) && sName.includes(seasonKey)) {
                         matchedSeasonName = sName + " (手動備份)";
-                        seasonData = manualDb[sName];
+                        seasonData = rawDatabaseManual[sName];
                         break;
                     }
                 }
@@ -371,7 +363,7 @@
             renderNormal(year, seasonKey, matchedSeasonName, seasonData);
         }
 
-        // 渲染一般分類檢視（已修復：使用穩定的年份+季節代號作為儲存 Key，絕不因文字變動而消失）
+        // 渲染一般分類檢視（使用穩定的年份+季節代號作為儲存 Key，集數絕對不會消失）
         function renderNormal(year, seasonKey, matchedSeasonName, seasonData) {
             const container = document.getElementById('animeContainer');
             const orderedDays = getOrderedDays();
@@ -384,8 +376,8 @@
                 const isToday = (dayName === todayName);
 
                 let htmlList = animeList.map((anime, index) => {
-                    // 🛡️ 關鍵修復：強制將 Key 簡化為「年份_季節_星期_動漫名稱」，確保前後端名稱不一致時，集數依然找得到！
                     const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
+                    // 🛡️ 固定 Key 格式：ep_年份_季節_星期_名稱，確保集數紀錄永遠對應
                     const storageKey = `ep_${year}_${seasonKey}_${dayName}_${safeKeyName}`;
                     const savedEp = localStorage.getItem(storageKey) || "";
                     
@@ -419,7 +411,7 @@
         }
 
         // 全站即時搜尋功能
-        async function handleSearch() {
+        function handleSearch() {
             const keyword = document.getElementById('searchInput').value.trim().toLowerCase();
             const container = document.getElementById('animeContainer');
 
@@ -428,18 +420,14 @@
                 return;
             }
 
-            container.innerHTML = '<p style="text-align: center; color: var(--text-sub);">正在全站搜尋...</p>';
-
-            const manualDb = await ensureManualLoaded();
-            const combinedDatabases = { ...manualDb, ...rawDatabaseAuto };
-
             container.innerHTML = "";
             let matchCount = 0;
+
+            const combinedDatabases = { ...rawDatabaseManual, ...rawDatabaseAuto };
 
             for (let seasonName in combinedDatabases) {
                 const seasonObj = combinedDatabases[seasonName];
                 
-                // 從季節名稱中抽取出年份與季節代號用於 Key 對應
                 let extractedYear = "2026";
                 let extractedSeason = "秋";
                 for(let y = 2017; y <= 2030; y++) {
@@ -471,55 +459,4 @@
                     resultsDiv.style.width = "100%";
                     resultsDiv.style.display = "grid";
                     resultsDiv.style.gridTemplateColumns = "repeat(auto-fill, minmax(260px, 1fr))";
-                    resultsDiv.style.gap = "12px";
-                    resultsDiv.style.marginBottom = "20px";
-
-                    let htmlList = matchedItems.map(anime => {
-                        const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
-                        const storageKey = `ep_${anime.year}_${anime.season}_${anime.day}_${safeKeyName}`;
-                        const savedEp = localStorage.getItem(storageKey) || "";
-                        
-                        const titleHtml = anime.link 
-                            ? `<a href="${anime.link}" target="_blank" class="anime-title">${anime.title}</a>`
-                            : `<span class="anime-title">${anime.title}</span>`;
-
-                        return `
-                            <div class="anime-item">
-                                <div style="flex-grow:1; display:flex; flex-direction:column; gap:4px;">
-                                    ${titleHtml}
-                                    <span style="font-size: 0.75rem; color: var(--accent-color);">📅 ${anime.day}</span>
-                                </div>
-                                <div class="ep-input-wrapper">
-                                    <span>第</span>
-                                    <input type="number" class="ep-input" value="${savedEp}" placeholder="-" 
-                                        oninput="saveProgress('${storageKey}', this.value)">
-                                    <span>集</span>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-
-                    resultsDiv.innerHTML = htmlList;
-                    container.appendChild(resultsDiv);
-                }
-            }
-
-            if (matchCount === 0) {
-                container.innerHTML = `<p style="text-align: center; color: var(--text-sub); margin-top: 40px;">找不到與「${keyword}」相關的動漫作品。</p>`;
-            }
-        }
-
-        // 即時儲存進度到該裝置
-        function saveProgress(key, val) {
-            if(val === "") {
-                localStorage.removeItem(key);
-            } else {
-                localStorage.setItem(key, val);
-            }
-        }
-
-        // 啟動載入
-        fetchSheetData();
-    </script>
-</body>
-</html>
+                    resultsDiv.
