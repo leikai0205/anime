@@ -291,19 +291,31 @@
 
         let rawDatabase = {};
 
-        // 從你的 Apps Script 抓取完整資料（只對應 auto 資料庫）
+        // ⚡ 採用快取優先機制：一開網頁先秒開快取，背景靜默讀取，達到 0 延遲體驗
         async function fetchSheetData() {
             const API_URL = "https://script.google.com/macros/s/AKfycbxDVeHWef6lwyEPUYavbJIGppFaJFL5IcirCcpoX1rifNDJD9WP4opQZnYvMGHnixQS/exec";
+            
+            // 1. 優先讀取瀏覽器快取，實現秒開
+            const cachedData = localStorage.getItem('cache_auto_db');
+            if (cachedData) {
+                rawDatabase = JSON.parse(cachedData);
+                updateView();
+            }
+
+            // 2. 背景默默向 Google 請求最新資料（不擋畫面）
             try {
                 const response = await fetch(API_URL);
                 const result = await response.json();
                 
-                // 對應後端簡化後的 { auto: data } 結構
                 rawDatabase = result.auto || {};
+                localStorage.setItem('cache_auto_db', JSON.stringify(rawDatabase));
                 
-                updateView();
+                updateView(); // 更新成最新資料
             } catch (error) {
-                document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法載入資料，請確認網路連線或 Apps Script 部署狀態。</p>';
+                // 如果沒有快取又連線失敗才顯示錯誤
+                if (!cachedData) {
+                    document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法載入資料，請確認網路連線或 Apps Script 部署狀態。</p>';
+                }
             }
         }
 
@@ -356,7 +368,7 @@
 
                 let htmlList = animeList.map((anime, index) => {
                     const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
-                    const storageKey = `ep_${matchedSeasonName}_${dayName}_${index}_${safeKeyName}`;
+                    const storageKey = `ep_${matchedSeasonName}_${safeKeyName}`; // 已經移除了星期幾，確保集數不會跑掉
                     const savedEp = localStorage.getItem(storageKey) || "";
                     
                     const titleHtml = anime.link 
@@ -424,14 +436,13 @@
                     let resultsDiv = document.createElement('div');
                     resultsDiv.style.width = "100%";
                     resultsDiv.style.display = "grid";
-                    resultsDiv.style.display = "grid";
                     resultsDiv.style.gridTemplateColumns = "repeat(auto-fill, minmax(260px, 1fr))";
                     resultsDiv.style.gap = "12px";
                     resultsDiv.style.marginBottom = "20px";
 
                     let htmlList = matchedItems.map(anime => {
                         const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
-                        const storageKey = `ep_${seasonName}_${anime.day}_${anime.idx}_${safeKeyName}`;
+                        const storageKey = `ep_${seasonName}_${safeKeyName}`;
                         const savedEp = localStorage.getItem(storageKey) || "";
                         
                         const titleHtml = anime.link 
@@ -454,6 +465,7 @@
                         `;
                     }).join('');
 
+                    resultsDiv.resultsDiv = htmlList;
                     resultsDiv.innerHTML = htmlList;
                     container.appendChild(resultsDiv);
                 }
