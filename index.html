@@ -1,90 +1,418 @@
-function doGet(e) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  
-  // 1. 讀取自動抓取區
-  var autoSheet = ss.getSheetByName("自動抓取動漫");
-  var autoData = parseSheetToJSON(autoSheet);
-  
-  // 2. 讀取手動備份區（工作表名稱為 "當季動漫"）
-  var manualSheet = ss.getSheetByName("當季動漫");
-  var manualData = parseSheetToJSON(manualSheet);
-  
-  var result = {
-    auto: autoData,
-    manual: manualData
-  };
-  
-  var callback = e && e.parameter ? e.parameter.callback : null;
-  var jsonString = JSON.stringify(result);
-  
-  if (callback) {
-    var output = callback + "(" + jsonString + ")";
-    return ContentService.createTextOutput(output)
-      .setMimeType(ContentService.MimeType.JAVASCRIPT);
-  } else {
-    return ContentService.createTextOutput(jsonString)
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的動漫進度管理系統</title>
+    <style>
+        :root {
+            --bg-color: #07090e;
+            --card-bg: #111827;
+            --border-color: #1f2937;
+            --text-main: #f3f4f6;
+            --text-sub: #9ca3af;
+            --accent-color: #38bdf8;
+            --today-border: #f43f5e;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 30px 20px;
+            display: flex;
+            flex-direction: column;
+            min-height: 90vh;
+        }
+        header { text-align: center; margin-bottom: 30px; }
+        header h1 { color: var(--text-main); font-weight: 600; font-size: 1.8rem; margin: 0; }
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 40px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        select, .search-input {
+            background-color: var(--card-bg);
+            color: var(--text-main);
+            border: 1px solid #374151;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            outline: none;
+        }
+        .search-input { width: 300px; }
+        .search-season-title {
+            width: 100%;
+            font-size: 1.1rem;
+            color: var(--accent-color);
+            border-bottom: 1px solid #374151;
+            padding-bottom: 8px;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            flex-grow: 1;
+            width: 100%;
+        }
+        .day-column {
+            background-color: var(--card-bg);
+            border-radius: 14px;
+            padding: 20px 24px;
+            border: 1px solid var(--border-color);
+        }
+        .day-column.is-today {
+            border: 1px solid var(--today-border);
+            background: linear-gradient(145deg, #111827 0%, #161b22 100%);
+        }
+        .day-header {
+            font-size: 1.15rem;
+            font-weight: 600;
+            padding-bottom: 12px;
+            margin-bottom: 16px;
+            border-bottom: 1px solid #27303f;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #e5e7eb;
+        }
+        .today-badge {
+            background-color: var(--today-border);
+            color: white;
+            font-size: 0.75rem;
+            padding: 3px 10px;
+            border-radius: 20px;
+        }
+        .anime-list { 
+            list-style: none; 
+            padding: 0; 
+            margin: 0; 
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 12px; 
+        }
+        .anime-item {
+            background-color: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            padding: 12px 16px;
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+        }
+        .anime-title { 
+            font-size: 0.9rem; 
+            line-height: 1.4; 
+            flex-grow: 1; 
+            color: var(--text-main);
+            text-decoration: none;
+        }
+        .anime-title:hover { color: var(--accent-color); text-decoration: underline; }
+        .ep-input-wrapper { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+        .ep-input-wrapper span { font-size: 0.8rem; color: var(--text-sub); }
+        .ep-input {
+            width: 50px;
+            background-color: #030712;
+            border: 1px solid #374151;
+            color: white;
+            text-align: center;
+            padding: 6px 4px;
+            border-radius: 8px;
+        }
+        footer {
+            text-align: center;
+            margin-top: 50px;
+            padding-top: 20px;
+            border-top: 1px solid #1f2937;
+            color: var(--text-sub);
+            font-size: 0.85rem;
+        }
+        footer a { color: var(--accent-color); text-decoration: none; }
+    </style>
+</head>
+<body>
 
-// 共用的解析函式：把工作表轉成結構化 JSON
-function parseSheetToJSON(sheet) {
-  if (!sheet) return {};
-  var data = sheet.getDataRange().getValues();
-  var database = {};
-  var currentSeason = "";
-  var currentDays = null;
-  var daysOrder = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
-  
-  for (var r = 0; r < data.length; r++) {
-    var row = data[r];
-    var firstCell = String(row[0]).trim();
-    
-    if (firstCell.indexOf("年") !== -1 && (firstCell.indexOf("冬") !== -1 || firstCell.indexOf("春") !== -1 || firstCell.indexOf("夏") !== -1 || firstCell.indexOf("秋") !== -1)) {
-      currentSeason = firstCell;
-      database[currentSeason] = { "星期日": [], "星期一": [], "星期二": [], "星期三": [], "星期四": [], "星期五": [], "星期六": [] };
-      continue;
-    }
-    
-    if (firstCell === "星期日" && currentSeason) {
-      currentDays = [];
-      for (var c = 0; c < 7; c++) {
-        var dayName = String(row[c]).trim();
-        if (daysOrder.includes(dayName)) {
-          currentDays.push(dayName);
+    <header>
+        <h1>🎬 我的動漫進度管理系統</h1>
+    </header>
+
+    <div class="controls">
+        <select id="yearSelect" onchange="handleControlChange()"></select>
+        <select id="seasonSelect" onchange="handleControlChange()">
+            <option value="冬">冬番 (1-3月)</option>
+            <option value="春">春番 (4-6月)</option>
+            <option value="夏">夏番 (7-9月)</option>
+            <option value="秋">秋番 (10-12月)</option>
+        </select>
+        <input type="text" id="searchInput" class="search-input" placeholder="🔍 輸入動漫名稱全站搜尋..." oninput="handleSearch()">
+    </div>
+
+    <div class="container" id="animeContainer">
+        <p style="text-align: center; grid-column: 1/-1; color: var(--text-sub);">正在載入中...</p>
+    </div>
+
+    <footer>
+        資料參考與引用自 <a href="https://anime1.me/" target="_blank">Anime1.me</a> 及其它公開資訊
+    </footer>
+
+    <script>
+        function getDefaultYearAndSeason() {
+            const now = new Date();
+            const currentYear = now.getFullYear();
+            const currentMonth = now.getMonth() + 1;
+            let currentSeason = "冬";
+            if (currentMonth >= 4 && currentMonth <= 6) currentSeason = "春";
+            else if (currentMonth >= 7 && currentMonth <= 9) currentSeason = "夏";
+            else if (currentMonth >= 10 && currentMonth <= 12) currentSeason = "秋";
+            return { year: currentYear.toString(), season: currentSeason };
         }
-      }
-      continue;
-    }
-    
-    if (currentSeason && currentDays && firstCell !== "") {
-      var hasValue = row.some(function(cell) { return cell !== ""; });
-      if (!hasValue) continue;
-      
-      var richTextValues = sheet.getRange(r + 1, 1, 1, 7).getRichTextValues()[0];
-      
-      for (var c = 0; c < 7; c++) {
-        var dayName = daysOrder[c];
-        var cellValue = String(row[c]).trim();
-        
-        if (cellValue && !daysOrder.includes(cellValue) && cellValue !== currentSeason) {
-          var link = "";
-          try {
-            var richText = richTextValues[c];
-            if (richText && richText.getLinkUrl()) {
-              link = richText.getLinkUrl();
+
+        const defaultInfo = getDefaultYearAndSeason();
+        const yearSelect = document.getElementById('yearSelect');
+        const seasonSelect = document.getElementById('seasonSelect');
+
+        const currentRealYear = new Date().getFullYear();
+        for (let y = currentRealYear; y >= 2017; y--) {
+            let opt = document.createElement('option');
+            opt.value = y;
+            opt.innerText = y + " 年";
+            if(y.toString() === defaultInfo.year) opt.selected = true;
+            yearSelect.appendChild(opt);
+        }
+        seasonSelect.value = defaultInfo.season;
+
+        let rawDatabaseAuto = {};
+        let rawDatabaseManual = {};
+        let isDataLoaded = false;
+
+        function fetchSheetData() {
+            const API_URL = "https://script.google.com/macros/s/AKfycbxDVeHWef6lwyEPUYavbJIGppFaJFL5IcirCcpoX1rifNDJD9WP4opQZnYvMGHnixQS/exec";
+            
+            // 1. 先用快取秒開畫面
+            const cachedAuto = localStorage.getItem('cache_auto');
+            const cachedManual = localStorage.getItem('cache_manual');
+            if (cachedAuto) {
+                rawDatabaseAuto = JSON.parse(cachedAuto);
+                rawDatabaseManual = cachedManual ? JSON.parse(cachedManual) : {};
+                isDataLoaded = true;
+                updateView();
             }
-          } catch (err) {}
-          
-          if (database[currentSeason] && database[currentSeason][dayName]) {
-            database[currentSeason][dayName].push({
-              title: cellValue,
-              link: link
-            });
-          }
+
+            // 2. 接收 Google 試算表回傳的資料
+            window.handleResponse = function(result) {
+                isDataLoaded = true;
+                
+                rawDatabaseAuto = result.auto || {};
+                rawDatabaseManual = result.manual || {};
+                
+                localStorage.setItem('cache_auto', JSON.stringify(rawDatabaseAuto));
+                localStorage.setItem('cache_manual', JSON.stringify(rawDatabaseManual));
+                
+                updateView();
+            };
+
+            const script = document.createElement('script');
+            script.src = `${API_URL}?callback=handleResponse`;
+            document.body.appendChild(script);
         }
-      }
-    }
-  }
-  return database;
-}
+
+        function handleControlChange() {
+            document.getElementById('searchInput').value = "";
+            updateView();
+        }
+
+        function getOrderedDays() {
+            const allDays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
+            const todayIndex = new Date().getDay();
+            let ordered = [];
+            for (let i = 0; i < 7; i++) {
+                ordered.push(allDays[(todayIndex + i) % 7]);
+            }
+            return ordered;
+        }
+
+        function updateView() {
+            const year = yearSelect.value;
+            const seasonKey = seasonSelect.value;
+            
+            let matchedSeasonName = "";
+            let seasonData = null;
+
+            // 1. 優先從「自動抓取動漫」尋找
+            for (let sName in rawDatabaseAuto) {
+                if (sName.includes(year) && sName.includes(seasonKey)) {
+                    matchedSeasonName = sName;
+                    seasonData = rawDatabaseAuto[sName];
+                    break;
+                }
+            }
+
+            // 2. 檢查自動抓取區該季是否有資料，若無，則改從「當季動漫」手動備份讀取
+            const isAutoEmpty = !seasonData || Object.keys(seasonData).every(day => !seasonData[day] || seasonData[day].length === 0);
+            
+            if (isAutoEmpty) {
+                for (let sName in rawDatabaseManual) {
+                    if (sName.includes(year) && sName.includes(seasonKey)) {
+                        matchedSeasonName = sName + " (手動備份)";
+                        seasonData = rawDatabaseManual[sName];
+                        break;
+                    }
+                }
+            }
+
+            renderNormal(year, seasonKey, matchedSeasonName, seasonData);
+        }
+
+        function renderNormal(year, seasonKey, matchedSeasonName, seasonData) {
+            const container = document.getElementById('animeContainer');
+            const orderedDays = getOrderedDays();
+            const todayName = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][new Date().getDay()];
+
+            container.innerHTML = "";
+            
+            orderedDays.forEach(dayName => {
+                const animeList = seasonData && seasonData[dayName] ? seasonData[dayName] : [];
+                const isToday = (dayName === todayName);
+
+                let htmlList = animeList.map((anime, index) => {
+                    const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
+                    const storageKey = `ep_${year}_${seasonKey}_${safeKeyName}`;
+                    
+                    const oldKey1 = `ep_${year}_${seasonKey}_${dayName}_${safeKeyName}`;
+                    const oldKey2 = `ep_${matchedSeasonName}_${dayName}_${index}_${safeKeyName}`;
+                    
+                    let savedEp = localStorage.getItem(storageKey) || localStorage.getItem(oldKey1) || localStorage.getItem(oldKey2) || "";
+                    
+                    if (!localStorage.getItem(storageKey) && savedEp !== "") {
+                        localStorage.setItem(storageKey, savedEp);
+                    }
+
+                    const titleHtml = anime.link 
+                        ? `<a href="${anime.link}" target="_blank" class="anime-title">${anime.title}</a>`
+                        : `<span class="anime-title">${anime.title}</span>`;
+
+                    return `
+                        <div class="anime-item">
+                            ${titleHtml}
+                            <div class="ep-input-wrapper">
+                                <span>第</span>
+                                <input type="number" class="ep-input" value="${savedEp}" placeholder="-" 
+                                    oninput="saveProgress('${storageKey}', this.value)">
+                                <span>集</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                container.innerHTML += `
+                    <div class="day-column ${isToday ? 'is-today' : ''}">
+                        <div class="day-header">
+                            <span>${dayName} (${animeList.length}部)</span>
+                            ${isToday ? '<span class="today-badge">🔥 今日</span>' : ''}
+                        </div>
+                        <ul class="anime-list">${animeList.length > 0 ? htmlList : '<p style="color:var(--text-sub); font-size:0.85rem; text-align:center; margin:15px 0; grid-column: 1/-1;">此季度尚無資料</p>'}</ul>
+                    </div>
+                `;
+            });
+        }
+
+        function handleSearch() {
+            const keyword = document.getElementById('searchInput').value.trim().toLowerCase();
+            const container = document.getElementById('animeContainer');
+
+            if (!keyword) {
+                updateView();
+                return;
+            }
+
+            container.innerHTML = "";
+            let matchCount = 0;
+            const combinedDatabases = { ...rawDatabaseManual, ...rawDatabaseAuto };
+
+            for (let seasonName in combinedDatabases) {
+                const seasonObj = combinedDatabases[seasonName];
+                let extractedYear = "2026";
+                let extractedSeason = "秋";
+                for(let y = 2017; y <= 2030; y++) {
+                    if(seasonName.includes(y)) extractedYear = y.toString();
+                }
+                if(seasonName.includes("冬")) extractedSeason = "冬";
+                if(seasonName.includes("春")) extractedSeason = "春";
+                if(seasonName.includes("夏")) extractedSeason = "夏";
+                if(seasonName.includes("秋")) extractedSeason = "秋";
+
+                let matchedItems = [];
+                for (let day in seasonObj) {
+                    seasonObj[day].forEach((anime, idx) => {
+                        if (anime.title.toLowerCase().includes(keyword)) {
+                            matchedItems.push({ ...anime, day: day, year: extractedYear, season: extractedSeason });
+                        }
+                    });
+                }
+
+                if (matchedItems.length > 0) {
+                    matchCount++;
+                    let seasonTitleDiv = document.createElement('div');
+                    seasonTitleDiv.className = 'search-season-title';
+                    seasonTitleDiv.innerText = `📂 ${seasonName} (找到 ${matchedItems.length} 部)`;
+                    container.appendChild(seasonTitleDiv);
+
+                    let resultsDiv = document.createElement('div');
+                    resultsDiv.style.width = "100%";
+                    resultsDiv.style.display = "grid";
+                    resultsDiv.style.gridTemplateColumns = "repeat(auto-fill, minmax(260px, 1fr))";
+                    resultsDiv.style.gap = "12px";
+                    resultsDiv.style.marginBottom = "20px";
+
+                    let htmlList = matchedItems.map(anime => {
+                        const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
+                        const storageKey = `ep_${anime.year}_${anime.season}_${safeKeyName}`;
+                        const savedEp = localStorage.getItem(storageKey) || "";
+
+                        const titleHtml = anime.link 
+                            ? `<a href="${anime.link}" target="_blank" class="anime-title">${anime.title}</a>`
+                            : `<span class="anime-title">${anime.title}</span>`;
+
+                        return `
+                            <div class="anime-item">
+                                <div style="flex-grow:1; display:flex; flex-direction:column; gap:4px;">
+                                    ${titleHtml}
+                                    <span style="font-size: 0.75rem; color: var(--accent-color);">📅 ${anime.day}</span>
+                                </div>
+                                <div class="ep-input-wrapper">
+                                    <span>第</span>
+                                    <input type="number" class="ep-input" value="${savedEp}" placeholder="-" 
+                                        oninput="saveProgress('${storageKey}', this.value)">
+                                    <span>集</span>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+
+                    resultsDiv.innerHTML = htmlList;
+                    container.appendChild(resultsDiv);
+                }
+            }
+
+            if (matchCount === 0) {
+                container.innerHTML = `<p style="text-align: center; color: var(--text-sub); margin-top: 40px;">找不到與「${keyword}」相關的動漫作品。</p>`;
+            }
+        }
+
+        function saveProgress(key, val) {
+            if(val === "") localStorage.removeItem(key);
+            else localStorage.setItem(key, val);
+        }
+
+        fetchSheetData();
+    </script>
+</body>
+</html>
