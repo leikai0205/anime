@@ -289,18 +289,17 @@
 
         seasonSelect.value = defaultInfo.season;
 
-        let rawDatabaseAuto = {};
-        let rawDatabaseManual = {};
+        let rawDatabase = {};
 
-        // 從你的 Apps Script 抓取完整資料（包含自動抓取與手動備份）
+        // 從你的 Apps Script 抓取完整資料（只對應 auto 資料庫）
         async function fetchSheetData() {
             const API_URL = "https://script.google.com/macros/s/AKfycbxDVeHWef6lwyEPUYavbJIGppFaJFL5IcirCcpoX1rifNDJD9WP4opQZnYvMGHnixQS/exec";
             try {
                 const response = await fetch(API_URL);
                 const result = await response.json();
                 
-                rawDatabaseAuto = result.auto || {};
-                rawDatabaseManual = result.manual || {};
+                // 對應後端簡化後的 { auto: data } 結構
+                rawDatabase = result.auto || {};
                 
                 updateView();
             } catch (error) {
@@ -326,34 +325,20 @@
             return ordered;
         }
 
-        // 一般選單檢視模式（具備雙保險容錯機制：優先抓自動抓取區，無資料則切換手動備份區）
+        // 一般選單檢視模式
         function updateView() {
             const year = yearSelect.value;
             const seasonKey = seasonSelect.value;
             
             let matchedSeasonName = "";
-            let seasonData = null;
-
-            // 1. 優先尋找「自動抓取區 (Auto)」
-            for (let sName in rawDatabaseAuto) {
+            for (let sName in rawDatabase) {
                 if (sName.includes(year) && sName.includes(seasonKey)) {
                     matchedSeasonName = sName;
-                    seasonData = rawDatabaseAuto[sName];
                     break;
                 }
             }
 
-            // 2. 如果自動抓取區沒有資料，自動切換至「手動備份區 (Manual)」
-            if (!seasonData || Object.keys(seasonData).every(day => seasonData[day].length === 0)) {
-                for (let sName in rawDatabaseManual) {
-                    if (sName.includes(year) && sName.includes(seasonKey)) {
-                        matchedSeasonName = sName + " (手動備份)";
-                        seasonData = rawDatabaseManual[sName];
-                        break;
-                    }
-                }
-            }
-
+            const seasonData = matchedSeasonName ? rawDatabase[matchedSeasonName] : null;
             renderNormal(year, seasonKey, matchedSeasonName, seasonData);
         }
 
@@ -403,7 +388,7 @@
             });
         }
 
-        // 全站即時搜尋功能（合併 Auto 與 Manual 搜尋）
+        // 全站即時搜尋功能
         function handleSearch() {
             const keyword = document.getElementById('searchInput').value.trim().toLowerCase();
             const container = document.getElementById('animeContainer');
@@ -416,11 +401,8 @@
             container.innerHTML = "";
             let matchCount = 0;
 
-            // 綜合搜尋兩邊的資料庫
-            const combinedDatabases = { ...rawDatabaseManual, ...rawDatabaseAuto };
-
-            for (let seasonName in combinedDatabases) {
-                const seasonObj = combinedDatabases[seasonName];
+            for (let seasonName in rawDatabase) {
+                const seasonObj = rawDatabase[seasonName];
                 
                 let matchedItems = [];
                 for (let day in seasonObj) {
@@ -441,6 +423,7 @@
 
                     let resultsDiv = document.createElement('div');
                     resultsDiv.style.width = "100%";
+                    resultsDiv.style.display = "grid";
                     resultsDiv.style.display = "grid";
                     resultsDiv.style.gridTemplateColumns = "repeat(auto-fill, minmax(260px, 1fr))";
                     resultsDiv.style.gap = "12px";
