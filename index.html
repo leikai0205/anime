@@ -251,7 +251,7 @@
     </footer>
 
     <script>
-        // 1. 自動判定目前的年份與季節（僅作為初次載入時的預設選項）
+        // 1. 自動判定目前的年份與季節
         function getDefaultYearAndSeason() {
             const now = new Date();
             const currentYear = now.getFullYear();
@@ -290,14 +290,14 @@
         seasonSelect.value = defaultInfo.season;
 
         let rawDatabase = {};
-        let isInitialized = false; // 💡 標記是否已經初始化過選單，防止背景資料載入時重置畫面
+        let isInitialized = false;
 
-        // ⚡ 採用快取優先機制
+        // ⚡ 直接抓取 Google 發布的 pubhtml 網頁來解析表格
         async function fetchSheetData() {
-            const API_URL = "https://script.google.com/macros/s/AKfycbxDVeHWef6lwyEPUYavbJIGppFaJFL5IcirCcpoX1rifNDJD9WP4opQZnYvMGHnixQS/exec";
+            const PUBHTML_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRvFC-_oB0Zyx9TlXHUooKch9y6JFP1Ao4wncwqfSEGX17yUsgxk2wPtdyZVobOL7rpH1nuCIUR85D7/pubhtml?gid=795740724&single=true";
             
-            // 1. 優先讀取瀏覽器快取
-            const cachedData = localStorage.getItem('cache_auto_db');
+            // 使用 proxy 或直接 fetch (若有跨域限制可透過全能代理，此處直接嘗試跨域 fetch)
+            const cachedData = localStorage.getItem('cache_pubhtml_db');
             if (cachedData) {
                 rawDatabase = JSON.parse(cachedData);
                 if (!isInitialized) {
@@ -306,40 +306,103 @@
                 }
             }
 
-            // 2. 背景向 Google 請求最新資料
             try {
-                const response = await fetch(API_URL);
-                const result = await response.json();
-                
-                rawDatabase = result.auto || {};
-                localStorage.setItem('cache_auto_db', JSON.stringify(rawDatabase));
-                
-                // 💡 只有在「使用者沒有在搜尋」且「還沒渲染過」時才更新
+                // 透過通用跨域代理抓取 pubhtml 內容
+                const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(PUBHTML_URL);
+                const response = await fetch(proxyUrl);
+                const data = await response.json();
+                const htmlText = data.contents;
+
+                // 解析 HTML 表格
+                rawDatabase = parsePubHtmlToDB(htmlText);
+                localStorage.setItem('cache_pubhtml_db', JSON.stringify(rawDatabase));
+
                 if (document.getElementById('searchInput').value.trim() === "" && !isInitialized) {
                     isInitialized = true;
                     updateView();
                 } else if (document.getElementById('searchInput').value.trim() !== "") {
-                    // 如果正在搜尋，背景資料更新後自動重新執行一次搜尋，把剛抓到的新資料即時帶進來！
                     handleSearch();
                 }
             } catch (error) {
                 if (!cachedData) {
-                    document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法載入資料，請確認網路連線或 Apps Script 部署狀態。</p>';
+                    document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法載入公開試算表資料，請確認網路連線。</p>';
                 }
             }
         }
 
-        // 當選單變更時觸發
+        // 解析 Google PubHTML 表格結構轉換成資料物件
+        function parsePubHtmlToDB(htmlText) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(htmlText, 'text/html');
+            const table = doc.querySelector('table');
+            if (!table) return {};
+
+            const rows = table.querySelectorAll('tr');
+            let database = {};
+            let currentSeason = "";
+            let daysOrder = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
+            let dayColIndexes = {};
+
+            rows.forEach(row => {
+                const cells = row.querySelectorAll('td, th');
+                if (cells.length === 0) return;
+
+                const firstCellText = cells[0].textContent.trim();
+
+                // 檢查是否為季度標題（包含年份與季節）
+                if (firstCellText.includes("年") && (firstCellText.includes("冬") || firstCellText.includes("春") || firstCellText.includes("夏") || firstCellText.includes("秋"))) {
+                    currentSeason = firstCellText;
+                    database[currentSeason] = { "星期日": [], "星期一": [], "星期二": [], "星期三": [], "星期四": [], "星期五": [], "星期六": [] };
+                    dayColIndexes = {};
+                    return;
+                }
+
+                // 檢查是否為星期標題列
+                if (firstCellText === "星期日" && currentSeason) {
+                    cells.forEach((cell, idx) => {
+                        const t = cell.textContent.trim();
+                        if (daysOrder.includes(t)) {
+                            dayColIndexes[idx] = t;
+                        }
+                    });
+                    return;
+                }
+
+                // 如果當前在某個季度底下，且已經抓到星期對應欄位
+                if (currentSeason && Object.keys(dayColIndexes).length > 0) {
+                    cells.forEach((cell, idx) => {
+                        if (dayColIndexes[idx]) {
+                            const dayName = dayColIndexes[idx];
+                            const text = cell.textContent.trim();
+                            const linkEl = cell.querySelector('a');
+                            const link = linkEl ? linkEl.href : "";
+
+                            if (text && !daysOrder.includes(text) && text !== currentSeason) {
+                                // 避免重複加入
+                                const exists = database[currentSeason][dayName].some(item => item.title === text);
+                                if (!exists) {
+                                    database[currentSeason][dayName].push({
+                                        title: text,
+                                        link: link.includes('http') ? link : ""
+                                    });
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+
+            return database;
+        }
+
         function handleControlChange() {
             document.getElementById('searchInput').value = "";
             updateView();
         }
 
-        // 取得動態排序的星期陣列（以今天為第一天）
         function getOrderedDays() {
             const allDays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
             const todayIndex = new Date().getDay();
-            
             let ordered = [];
             for (let i = 0; i < 7; i++) {
                 ordered.push(allDays[(todayIndex + i) % 7]);
@@ -347,19 +410,16 @@
             return ordered;
         }
 
-        // 一般選單檢視模式
         function updateView() {
             const keyword = document.getElementById('searchInput').value.trim();
-            if (keyword !== "") {
-                return;
-            }
+            if (keyword !== "") return;
 
             const year = yearSelect.value;
             const seasonKey = seasonSelect.value;
             
             let matchedSeasonName = "";
             for (let sName in rawDatabase) {
-                if (sName.includes(year) && sName.includes(seasonKey)) {
+                if (sName.indexOf(year) !== -1 && sName.indexOf(seasonKey) !== -1) {
                     matchedSeasonName = sName;
                     break;
                 }
@@ -369,7 +429,6 @@
             renderNormal(year, seasonKey, matchedSeasonName, seasonData);
         }
 
-        // 渲染一般分類檢視
         function renderNormal(year, seasonKey, matchedSeasonName, seasonData) {
             const container = document.getElementById('animeContainer');
             const orderedDays = getOrderedDays();
@@ -381,7 +440,7 @@
                 const animeList = seasonData && seasonData[dayName] ? seasonData[dayName] : [];
                 const isToday = (dayName === todayName);
 
-                let htmlList = animeList.map((anime, index) => {
+                let htmlList = animeList.map((anime) => {
                     const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
                     const storageKey = `ep_${matchedSeasonName}_${safeKeyName}`;
                     const savedEp = localStorage.getItem(storageKey) || "";
@@ -415,7 +474,6 @@
             });
         }
 
-        // 全站即時搜尋功能
         function handleSearch() {
             const keyword = document.getElementById('searchInput').value.trim().toLowerCase();
             const container = document.getElementById('animeContainer');
@@ -430,7 +488,6 @@
 
             for (let seasonName in rawDatabase) {
                 const seasonObj = rawDatabase[seasonName];
-                
                 let matchedItems = [];
                 for (let day in seasonObj) {
                     seasonObj[day].forEach((anime, idx) => {
@@ -442,7 +499,6 @@
 
                 if (matchedItems.length > 0) {
                     matchCount++;
-                    
                     let seasonTitleDiv = document.createElement('div');
                     seasonTitleDiv.className = 'search-season-title';
                     seasonTitleDiv.innerText = `📂 ${seasonName} (找到 ${matchedItems.length} 部)`;
@@ -490,7 +546,6 @@
             }
         }
 
-        // 即時儲存進度到該裝置
         function saveProgress(key, val) {
             if(val === "") {
                 localStorage.removeItem(key);
@@ -499,7 +554,6 @@
             }
         }
 
-        // 啟動載入
         fetchSheetData();
     </script>
 </body>
