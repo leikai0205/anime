@@ -192,9 +192,11 @@
         let rawDatabaseAuto = {};
         let rawDatabaseManual = {};
 
-        async function fetchSheetData() {
+        // 🛡️ 使用無敵防阻擋的 script 注入法（繞過 CORS 限制）
+        function fetchSheetData() {
             const API_URL = "https://script.google.com/macros/s/AKfycbxDVeHWef6lwyEPUYavbJIGppFaJFL5IcirCcpoX1rifNDJD9WP4opQZnYvMGHnixQS/exec";
             
+            // 先讀取快取秒開
             const cachedAuto = localStorage.getItem('cache_auto');
             const cachedManual = localStorage.getItem('cache_manual');
             if (cachedAuto) {
@@ -203,27 +205,21 @@
                 updateView();
             }
 
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 4000);
+            // 動態建立 script 標籤直接載入資料，絕不會被 CORS 卡住
+            const script = document.createElement('script');
+            script.src = `${API_URL}?callback=handleResponse`;
+            document.body.appendChild(script);
+        }
 
-                const response = await fetch(API_URL, { signal: controller.signal });
-                clearTimeout(timeoutId);
-
-                const result = await response.json();
-                
-                rawDatabaseAuto = result.auto || {};
-                rawDatabaseManual = result.manual || {};
-                
-                localStorage.setItem('cache_auto', JSON.stringify(rawDatabaseAuto));
-                localStorage.setItem('cache_manual', JSON.stringify(rawDatabaseManual));
-                
-                updateView();
-            } catch (error) {
-                if (!cachedAuto) {
-                    document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">連線逾時，請確認 Apps Script 部署狀態。</p>';
-                }
-            }
+        // 接收 Google 回傳的資料
+        function handleResponse(result) {
+            rawDatabaseAuto = result.auto || {};
+            rawDatabaseManual = result.manual || {};
+            
+            localStorage.setItem('cache_auto', JSON.stringify(rawDatabaseAuto));
+            localStorage.setItem('cache_manual', JSON.stringify(rawDatabaseManual));
+            
+            updateView();
         }
 
         function handleControlChange() {
@@ -284,11 +280,8 @@
 
                 let htmlList = animeList.map((anime, index) => {
                     const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
-                    
-                    // 🎯 關鍵改動：拿掉星期幾！只用「ep_年份_季節_動漫名稱」當作 Key
                     const storageKey = `ep_${year}_${seasonKey}_${safeKeyName}`;
                     
-                    // 同時相容舊的 Key 格式，如果舊格式有資料就自動抓過來並升級成新格式
                     const oldKey1 = `ep_${year}_${seasonKey}_${dayName}_${safeKeyName}`;
                     const oldKey2 = `ep_${matchedSeasonName}_${dayName}_${index}_${safeKeyName}`;
                     
