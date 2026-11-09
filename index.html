@@ -160,7 +160,7 @@
     </div>
 
     <footer>
-        資料參考與引用自 <a href="https://anime1.me/" target="_blank">Anime1.me</a> 及其它公開資訊
+        資料參考與引用自 [Anime1.me](https://anime1.me/) 及其它公開資訊
     </footer>
 
     <script>
@@ -361,58 +361,4 @@
                 if (matchedItems.length > 0) {
                     matchCount++;
                     let seasonTitleDiv = document.createElement('div');
-                    seasonTitleDiv.className = 'search-season-title';
-                    seasonTitleDiv.innerText = `📂 ${seasonName} (找到 ${matchedItems.length} 部)`;
-                    container.appendChild(seasonTitleDiv);
-
-                    let resultsDiv = document.createElement('div');
-                    resultsDiv.style.width = "100%";
-                    resultsDiv.style.display = "grid";
-                    resultsDiv.style.gridTemplateColumns = "repeat(auto-fill, minmax(260px, 1fr))";
-                    resultsDiv.style.gap = "12px";
-                    resultsDiv.style.marginBottom = "20px";
-
-                    let htmlList = matchedItems.map(anime => {
-                        const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
-                        const storageKey = `ep_${anime.year}_${anime.season}_${safeKeyName}`;
-                        const savedEp = localStorage.getItem(storageKey) || "";
-
-                        const titleHtml = anime.link 
-                            ? `<a href="${anime.link}" target="_blank" class="anime-title">${anime.title}</a>`
-                            : `<span class="anime-title">${anime.title}</span>`;
-
-                        return `
-                            <div class="anime-item">
-                                <div style="flex-grow:1; display:flex; flex-direction:column; gap:4px;">
-                                    ${titleHtml}
-                                    <span style="font-size: 0.75rem; color: var(--accent-color);">📅 ${anime.day}</span>
-                                </div>
-                                <div class="ep-input-wrapper">
-                                    <span>第</span>
-                                    <input type="number" class="ep-input" value="${savedEp}" placeholder="-" 
-                                        oninput="saveProgress('${storageKey}', this.value)">
-                                    <span>集</span>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-
-                    resultsDiv.innerHTML = htmlList;
-                    container.appendChild(resultsDiv);
-                }
-            }
-
-            if (matchCount === 0) {
-                container.innerHTML = `<p style="text-align: center; color: var(--text-sub); margin-top: 40px;">找不到與「${keyword}」相關的動漫作品。</p>`;
-            }
-        }
-
-        function saveProgress(key, val) {
-            if(val === "") localStorage.removeItem(key);
-            else localStorage.setItem(key, val);
-        }
-
-        fetchSheetData();
-    </script>
-</body>
-</html>
+                    season
