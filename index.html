@@ -160,7 +160,7 @@
     </div>
 
     <footer>
-        資料參考與引用自 [Anime1.me](https://anime1.me/) 及其它公開資訊
+        資料參考與引用自 <a href="https://anime1.me/" target="_blank">Anime1.me</a> 及其它公開資訊
     </footer>
 
     <script>
@@ -191,35 +191,54 @@
 
         let rawDatabaseAuto = {};
         let rawDatabaseManual = {};
+        let isDataLoaded = false;
 
-        // 🛡️ 使用無敵防阻擋的 script 注入法（繞過 CORS 限制）
+        // 🛡️ 帶有強制超時解凍機制的載入方式
         function fetchSheetData() {
             const API_URL = "https://script.google.com/macros/s/AKfycbxDVeHWef6lwyEPUYavbJIGppFaJFL5IcirCcpoX1rifNDJD9WP4opQZnYvMGHnixQS/exec";
             
-            // 先讀取快取秒開
+            // 1. 先讀取快取秒開
             const cachedAuto = localStorage.getItem('cache_auto');
             const cachedManual = localStorage.getItem('cache_manual');
             if (cachedAuto) {
                 rawDatabaseAuto = JSON.parse(cachedAuto);
                 rawDatabaseManual = cachedManual ? JSON.parse(cachedManual) : {};
+                isDataLoaded = true;
                 updateView();
             }
 
-            // 動態建立 script 標籤直接載入資料，絕不會被 CORS 卡住
+            // 2. 設定 2.5 秒超時保護：如果 2.5 秒內後端沒回應，強制解除等待
+            const timeoutTimer = setTimeout(() => {
+                if (!isDataLoaded) {
+                    if (!cachedAuto) {
+                        document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">載入逾時，請檢查網路或重新整理。</p>';
+                    }
+                }
+            }, 2500);
+
+            // 3. 發送 Script 請求
+            window.handleResponse = function(result) {
+                isDataLoaded = true;
+                clearTimeout(timeoutTimer);
+                
+                rawDatabaseAuto = result.auto || {};
+                rawDatabaseManual = result.manual || {};
+                
+                localStorage.setItem('cache_auto', JSON.stringify(rawDatabaseAuto));
+                localStorage.setItem('cache_manual', JSON.stringify(rawDatabaseManual));
+                
+                updateView();
+            };
+
             const script = document.createElement('script');
             script.src = `${API_URL}?callback=handleResponse`;
+            script.onerror = function() {
+                clearTimeout(timeoutTimer);
+                if (!isDataLoaded && !cachedAuto) {
+                    document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法連線至伺服器。</p>';
+                }
+            };
             document.body.appendChild(script);
-        }
-
-        // 接收 Google 回傳的資料
-        function handleResponse(result) {
-            rawDatabaseAuto = result.auto || {};
-            rawDatabaseManual = result.manual || {};
-            
-            localStorage.setItem('cache_auto', JSON.stringify(rawDatabaseAuto));
-            localStorage.setItem('cache_manual', JSON.stringify(rawDatabaseManual));
-            
-            updateView();
         }
 
         function handleControlChange() {
