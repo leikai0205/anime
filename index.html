@@ -24,8 +24,19 @@
             flex-direction: column;
             min-height: 90vh;
         }
-        header { text-align: center; margin-bottom: 30px; }
-        header h1 { color: var(--text-main); font-weight: 600; font-size: 1.8rem; margin: 0; }
+        header { text-align: center; margin-bottom: 20px; }
+        header h1 { color: var(--text-main); font-weight: 600; font-size: 1.8rem; margin: 0 0 10px 0; }
+        .refresh-btn {
+            background-color: #1f2937;
+            color: var(--accent-color);
+            border: 1px solid #374151;
+            padding: 6px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: background 0.2s;
+        }
+        .refresh-btn:hover { background-color: #374151; }
         .controls {
             display: flex;
             justify-content: center;
@@ -142,6 +153,7 @@
 
     <header>
         <h1>🎬 我的動漫進度管理系統</h1>
+        <button class="refresh-btn" onclick="fetchSheetData(true)">🔄 強制重新載入最新資料</button>
     </header>
 
     <div class="controls">
@@ -160,7 +172,7 @@
     </div>
 
     <footer>
-        資料參考與引用自 [Anime1.me](https://anime1.me/) 及其它公開資訊
+        資料參考與引用自 <a href="https://anime1.me/" target="_blank">Anime1.me</a> 及其它公開資訊
     </footer>
 
     <script>
@@ -191,25 +203,25 @@
 
         let rawDatabaseAuto = {};
         let rawDatabaseManual = {};
-        let isDataLoaded = false;
 
-        function fetchSheetData() {
+        function fetchSheetData(isManualRefresh = false) {
             const API_URL = "https://script.google.com/macros/s/AKfycbxDVeHWef6lwyEPUYavbJIGppFaJFL5IcirCcpoX1rifNDJD9WP4opQZnYvMGHnixQS/exec";
             
-            // 1. 先用快取秒開畫面
+            if (isManualRefresh) {
+                document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; grid-column: 1/-1; color: var(--accent-color);">正在向 Google 伺服器重新取得最新資料，請稍候...</p>';
+            }
+
+            // 1. 先用快取秒開畫面（避免每次都要空等）
             const cachedAuto = localStorage.getItem('cache_auto');
             const cachedManual = localStorage.getItem('cache_manual');
-            if (cachedAuto) {
+            if (cachedAuto && !isManualRefresh) {
                 rawDatabaseAuto = JSON.parse(cachedAuto);
                 rawDatabaseManual = cachedManual ? JSON.parse(cachedManual) : {};
-                isDataLoaded = true;
                 updateView();
             }
 
-            // 2. 接收 Google 試算表回傳的資料
+            // 2. 接收 Google 試算表回傳的 JSONP 資料
             window.handleResponse = function(result) {
-                isDataLoaded = true;
-                
                 rawDatabaseAuto = result.auto || {};
                 rawDatabaseManual = result.manual || {};
                 
@@ -219,72 +231,9 @@
                 updateView();
             };
 
+            // 每次請求加上時間戳記防止瀏覽器快取舊請求
             const script = document.createElement('script');
-            script.src = `${API_URL}?callback=handleResponse`;
-            document.body.appendChild(script);
-        }
-
-        function handleControlChange() {
-            document.getElementById('searchInput').value = "";
-            updateView();
-        }
-
-        function getOrderedDays() {
-            const allDays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
-            const todayIndex = new Date().getDay();
-            let ordered = [];
-            for (let i = 0; i < 7; i++) {
-                ordered.push(allDays[(todayIndex + i) % 7]);
-            }
-            return ordered;
-        }
-
-        function updateView() {
-            const year = yearSelect.value;
-            const seasonKey = seasonSelect.value;
-            
-            let matchedSeasonName = "";
-            let seasonData = null;
-
-            // 1. 優先從「自動抓取動漫」尋找
-            for (let sName in rawDatabaseAuto) {
-                if (sName.includes(year) && sName.includes(seasonKey)) {
-                    matchedSeasonName = sName;
-                    seasonData = rawDatabaseAuto[sName];
-                    break;
-                }
-            }
-
-            // 2. 檢查自動抓取區該季是否有資料，若無，則改從「當季動漫」手動備份讀取
-            const isAutoEmpty = !seasonData || Object.keys(seasonData).every(day => !seasonData[day] || seasonData[day].length === 0);
-            
-            if (isAutoEmpty) {
-                for (let sName in rawDatabaseManual) {
-                    if (sName.includes(year) && sName.includes(seasonKey)) {
-                        matchedSeasonName = sName + " (手動備份)";
-                        seasonData = rawDatabaseManual[sName];
-                        break;
-                    }
-                }
-            }
-
-            renderNormal(year, seasonKey, matchedSeasonName, seasonData);
-        }
-
-        function renderNormal(year, seasonKey, matchedSeasonName, seasonData) {
-            const container = document.getElementById('animeContainer');
-            const orderedDays = getOrderedDays();
-            const todayName = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][new Date().getDay()];
-
-            container.innerHTML = "";
-            
-            orderedDays.forEach(dayName => {
-                const animeList = seasonData && seasonData[dayName] ? seasonData[dayName] : [];
-                const isToday = (dayName === todayName);
-
-                let htmlList = animeList.map((anime, index) => {
-                    const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
-                    const storageKey = `ep_${year}_${seasonKey}_${safeKeyName}`;
+            script.src = `${API_URL}?callback=handleResponse&t=${new Date().getTime()}`;  script.onerror = function() { document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法連線至 Google 伺服器，請確認 Apps Script 部署狀態是否為「所有人」。</p>'; };  document.body.appendChild(script); }  function handleControlChange() { document.getElementById('searchInput').value = ""; updateView(); }  function getOrderedDays() { const allDays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"]; const todayIndex = new Date().getDay(); let ordered = []; for (let i = 0; i < 7; i++) { ordered.push(allDays[(todayIndex + i) \% 7]); } return ordered; }  function updateView() { const year = yearSelect.value; const seasonKey = seasonSelect.value;  let matchedSeasonName = ""; let seasonData = null;  // 1. 優先從「自動抓取動漫」尋找 for (let sName in rawDatabaseAuto) { if (sName.includes(year) && sName.includes(seasonKey)) { matchedSeasonName = sName; seasonData = rawDatabaseAuto[sName]; break; } }  // 2. 檢查自動抓取區該季是否有資料，若無，則改從「當季動漫」手動備份讀取 const isAutoEmpty = !seasonData \vert{}\vert{} Object.keys(seasonData).every(day => !seasonData[day] \vert{}\vert{} seasonData[day].length === 0);  if (isAutoEmpty) { for (let sName in rawDatabaseManual) { if (sName.includes(year) && sName.includes(seasonKey)) { matchedSeasonName = sName + " (手動備份)"; seasonData = rawDatabaseManual[sName]; break; } } }  renderNormal(year, seasonKey, matchedSeasonName, seasonData); }  function renderNormal(year, seasonKey, matchedSeasonName, seasonData) { const container = document.getElementById('animeContainer'); const orderedDays = getOrderedDays(); const todayName = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][new Date().getDay()];  container.innerHTML = "";  orderedDays.forEach(dayName => { const animeList = seasonData && seasonData[dayName] ? seasonData[dayName] : []; const isToday = (dayName === todayName);  let htmlList = animeList.map((anime, index) => { const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_"); const storageKey = `ep_${year}_${seasonKey}_${safeKeyName}`;
                     
                     const oldKey1 = `ep_${year}_${seasonKey}_${dayName}_${safeKeyName}`;
                     const oldKey2 = `ep_${matchedSeasonName}_${dayName}_${index}_${safeKeyName}`;
@@ -313,52 +262,4 @@
                 }).join('');
 
                 container.innerHTML += `
-                    <div class="day-column ${isToday ? 'is-today' : ''}">
-                        <div class="day-header">
-                            <span>${dayName} (${animeList.length}部)</span>
-                            ${isToday ? '<span class="today-badge">🔥 今日</span>' : ''}
-                        </div>
-                        <ul class="anime-list">${animeList.length > 0 ? htmlList : '<p style="color:var(--text-sub); font-size:0.85rem; text-align:center; margin:15px 0; grid-column: 1/-1;">此季度尚無資料</p>'}</ul>
-                    </div>
-                `;
-            });
-        }
-
-        function handleSearch() {
-            const keyword = document.getElementById('searchInput').value.trim().toLowerCase();
-            const container = document.getElementById('animeContainer');
-
-            if (!keyword) {
-                updateView();
-                return;
-            }
-
-            container.innerHTML = "";
-            let matchCount = 0;
-            const combinedDatabases = { ...rawDatabaseManual, ...rawDatabaseAuto };
-
-            for (let seasonName in combinedDatabases) {
-                const seasonObj = combinedDatabases[seasonName];
-                let extractedYear = "2026";
-                let extractedSeason = "秋";
-                for(let y = 2017; y <= 2030; y++) {
-                    if(seasonName.includes(y)) extractedYear = y.toString();
-                }
-                if(seasonName.includes("冬")) extractedSeason = "冬";
-                if(seasonName.includes("春")) extractedSeason = "春";
-                if(seasonName.includes("夏")) extractedSeason = "夏";
-                if(seasonName.includes("秋")) extractedSeason = "秋";
-
-                let matchedItems = [];
-                for (let day in seasonObj) {
-                    seasonObj[day].forEach((anime, idx) => {
-                        if (anime.title.toLowerCase().includes(keyword)) {
-                            matchedItems.push({ ...anime, day: day, year: extractedYear, season: extractedSeason });
-                        }
-                    });
-                }
-
-                if (matchedItems.length > 0) {
-                    matchCount++;
-                    let seasonTitleDiv = document.createElement('div');
-                    season
+                    <div class="day-column ${isToday ? 'is-today' :
