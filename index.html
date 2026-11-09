@@ -339,6 +339,12 @@
 
         // 一般選單檢視模式
         function updateView() {
+            // 💡 防呆機制：如果使用者正在搜尋框輸入文字，直接中斷，不讓畫面被選單強制重置
+            const keyword = document.getElementById('searchInput').value.trim();
+            if (keyword !== "") {
+                return;
+            }
+
             const year = yearSelect.value;
             const seasonKey = seasonSelect.value;
             
@@ -368,7 +374,7 @@
 
                 let htmlList = animeList.map((anime, index) => {
                     const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
-                    const storageKey = `ep_${matchedSeasonName}_${safeKeyName}`; // 已經移除了星期幾，確保集數不會跑掉
+                    const storageKey = `ep_${matchedSeasonName}_${safeKeyName}`;
                     const savedEp = localStorage.getItem(storageKey) || "";
                     
                     const titleHtml = anime.link 
@@ -465,28 +471,10 @@
                         `;
                     }).join('');
 
-                    resultsDiv.resultsDiv = htmlList;
                     resultsDiv.innerHTML = htmlList;
                     container.appendChild(resultsDiv);
                 }
             }
 
             if (matchCount === 0) {
-                container.innerHTML = `<p style="text-align: center; color: var(--text-sub); margin-top: 40px;">找不到與「${keyword}」相關的動漫作品。</p>`;
-            }
-        }
-
-        // 即時儲存進度到該裝置
-        function saveProgress(key, val) {
-            if(val === "") {
-                localStorage.removeItem(key);
-            } else {
-                localStorage.setItem(key, val);
-            }
-        }
-
-        // 啟動載入
-        fetchSheetData();
-    </script>
-</body>
-</html>
+                container.innerHTML = `<p style="text-align: center; color: var(--text-sub); margin-top: 40px;">找不到與「${
