@@ -228,7 +228,7 @@
         <h1>🎬 我的動漫進度管理系統</h1>
     </header>
 
-    <!-- 控制列：年份、季節選單 與 搜尋輸入框 -->
+    <!-- 控制列：年份, 季節選單 與 搜尋輸入框 -->
     <div class="controls">
         <select id="yearSelect" onchange="handleControlChange()">
             <!-- JS 自動產生目前年份到 2017 -->
@@ -297,8 +297,8 @@
         async function fetchSheetData() {
             const GAS_API_URL = "https://script.google.com/macros/s/AKfycbxDVeHWef6lwyEPUYavbJIGppFaJFL5IcirCcpoX1rifNDJD9WP4opQZnYvMGHnixQS/exec"; 
             
-            // 1. 優先讀取瀏覽器快取，實現 0 秒秒開
-            const cachedData = localStorage.getItem('cache_gas_api_db_v1');
+            // 1. 優先讀取瀏覽器快取，實現 0 秒秒開 (使用 v2 確保強制重新抓取)
+            const cachedData = localStorage.getItem('cache_gas_api_db_v2');
             if (cachedData) {
                 rawDatabase = JSON.parse(cachedData);
                 isInitialized = true;
@@ -313,7 +313,7 @@
                 const jsonData = await response.json();
 
                 rawDatabase = jsonData;
-                localStorage.setItem('cache_gas_api_db_v1', JSON.stringify(rawDatabase));
+                localStorage.setItem('cache_gas_api_db_v2', JSON.stringify(rawDatabase));
 
                 if (!isInitialized || document.getElementById('searchInput').value.trim() === "") {
                     isInitialized = true;
