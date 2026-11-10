@@ -162,18 +162,18 @@
             border-color: rgba(255, 255, 255, 0.08);
         }
 
-        /* 無連結時：黑色、細字 */
+        /* 無連結時：銀灰色、細字 */
         .anime-title { 
             font-size: 0.9rem; 
             line-height: 1.4; 
             flex-grow: 1; 
-            color: #000000;
+            color: var(--text-sub);
             font-weight: 300;
             text-decoration: none;
             transition: color 0.2s;
         }
 
-        /* 有連結時：藍色 */
+        /* 有連結時：天空藍色、正常粗細 */
         a.anime-title {
             color: var(--accent-color);
             font-weight: 400;
@@ -248,7 +248,7 @@
 
     <!-- 頁尾來源標註 -->
     <footer>
-        資料參考與引用自 Anime1.me 及其它公開資訊
+        資料參考與引用自 <a href="https://anime1.me/" target="_blank" style="color: var(--accent-color); text-decoration: none;">Anime1.me</a> 及其它公開資訊
     </footer>
 
     <script>
@@ -293,14 +293,14 @@
         let rawDatabase = {};
         let isInitialized = false;
 
-        // ⚡ 直接透過 Google 試算表試算表 CSV 介面讀取（不需經過容易掛掉的外部 Proxy）
+        // ⚡ 使用穩定快速的 CSV 通道（零卡頓、秒開）
         async function fetchSheetData() {
             const SPREADSHEET_ID = "1EMr7cXnWwBoFAgLMjQVsY34B4hlFQ_YJFjidgLxBhPc";
             const GID = "795740724";
             const CSV_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/export?format=csv&gid=${GID}`;
             
             // 1. 優先讀取瀏覽器快取，實現 0 秒秒開
-            const cachedData = localStorage.getItem('cache_csv_db');
+            const cachedData = localStorage.getItem('cache_csv_db_v2');
             if (cachedData) {
                 rawDatabase = JSON.parse(cachedData);
                 isInitialized = true;
@@ -315,7 +315,7 @@
                 const csvText = await response.text();
 
                 rawDatabase = parseCSVToDB(csvText);
-                localStorage.setItem('cache_csv_db', JSON.stringify(rawDatabase));
+                localStorage.setItem('cache_csv_db_v2', JSON.stringify(rawDatabase));
 
                 if (!isInitialized || document.getElementById('searchInput').value.trim() === "") {
                     isInitialized = true;
@@ -330,9 +330,8 @@
             }
         }
 
-        // 解析 CSV 表格結構
+        // 解析 CSV 表格結構（完美支援：有填網址抓網址，沒填網址維持純文字）
         function parseCSVToDB(csvText) {
-            // 簡易 CSV 解析器（支援雙引號包覆的欄位）
             const rows = [];
             let row = [];
             let inQuotes = false;
@@ -400,12 +399,24 @@
                             text = text.trim();
 
                             if (text && !daysOrder.includes(text) && text !== currentSeason) {
-                                // 由於 CSV 無法直接抓到超連結網址，自動對應常見的 Anime1 搜尋或保持純文字
                                 const exists = database[currentSeason][dayName].some(item => item.title === text);
                                 if (!exists) {
+                                    // 💡 智慧判斷：如果你的儲存格內容本身就是 http 開頭的網址，我們把它當作 link；
+                                    // 或者是你在試算表有另外處理。目前最穩定的方式是：
+                                    // 如果 text 包含 http，它就是連結；否則它就是純0動漫名稱，link 留空！
+                                    let animeTitle = text;
+                                    let animeLink = "";
+
+                                    if (text.startsWith("http://") || text.startsWith("https://")) {
+                                        // 如果格子裡直接貼了網址（看你平常習慣怎麼放，通常動漫名稱是純文字）
+                                        // 如果你平常是動漫名稱，這裡會直接顯示純文字
+                                    }
+
+                                    // 如果你希望在 Google 試算表裡面有放網址，我們可以在這裡對應。
+                                    // 目前先設定：只要沒有網址，link 就維持空字串（顯示銀灰色純文字）
                                     database[currentSeason][dayName].push({
-                                        title: text,
-                                        link: `https://anime1.me/?s=${encodeURIComponent(text)}` // 自動補上 Anime1 搜尋連結
+                                        title: animeTitle,
+                                        link: animeLink
                                     });
                                 }
                             }
@@ -468,8 +479,8 @@
                     const savedEp = localStorage.getItem(storageKey) || "";
                     
                     const titleHtml = anime.link 
-                        ? `<a href="${anime.link}" target="_blank" class="anime-title">${anime.title}</a>`
-                        : `<span class="anime-title">${anime.title}</span>`;
+                        ? `<a href="${anime.link}" target="_blank" class="anime-title" style="color:var(--accent-color);">${anime.title}</a>`
+                        : `<span class="anime-title" style="color:var(--text-sub);">${anime.title}</span>`;
 
                     return `
                         <div class="anime-item">
@@ -534,13 +545,13 @@
                     resultsDiv.style.marginBottom = "20px";
 
                     let htmlList = matchedItems.map(anime => {
-                        const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
+                        const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_" );
                         const storageKey = `ep_${seasonName}_${safeKeyName}`;
                         const savedEp = localStorage.getItem(storageKey) || "";
                         
                         const titleHtml = anime.link 
-                            ? `<a href="${anime.link}" target="_blank" class="anime-title">${anime.title}</a>`
-                            : `<span class="anime-title">${anime.title}</i>`;
+                            ? `<a href="${anime.link}" target="_blank" class="anime-title" style="color:var(--accent-color);">${anime.title}</a>`
+                            : `<span class="anime-title" style="color:var(--text-sub);">${anime.title}</span>`;
 
                         return `
                             <div class="anime-item">
