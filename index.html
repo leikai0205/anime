@@ -228,7 +228,7 @@
         <h1>🎬 我的動漫進度管理系統</h1>
     </header>
 
-    <!-- 控制列：年份、季節選單 與 搜尋輸入框 -->
+    <!-- 控制列：年份, 季節選單 與 搜尋輸入框 -->
     <div class="controls">
         <select id="yearSelect" onchange="handleControlChange()">
             <!-- JS 自動產生目前年份到 2017 -->
@@ -293,14 +293,12 @@
         let rawDatabase = {};
         let isInitialized = false;
 
-        // ⚡ 使用 Google GViz API 讀取試算表（能同時抓到文字與儲存格內的真實超連結）
+        // ⚡ 使用穩定且支援跨域與超連結抓取的 PubHTML 解析機制
         async function fetchSheetData() {
-            const SPREADSHEET_ID = "1EMr7cXnWwBoFAgLMjQVsY34B4hlFQ_YJFjidgLxBhPc";
-            const GID = "795740724";
-            const GVIZ_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?gid=${GID}&tqx=out:json`;
+            const PUBHTML_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRvFC-_oB0Zyx9TlXHUooKch9y6JFP1Ao4wncwqfSEGX17yUsgxk2wPtdyZVobOL7rpH1nuCIUR85D7/pubhtml?gid=795740724&single=true";
             
             // 1. 優先讀取瀏覽器快取，實現 0 秒秒開
-            const cachedData = localStorage.getItem('cache_gviz_db');
+            const cachedData = localStorage.getItem('cache_pubhtml_db_v2');
             if (cachedData) {
                 rawDatabase = JSON.parse(cachedData);
                 isInitialized = true;
@@ -310,15 +308,14 @@
             }
 
             try {
-                const response = await fetch(GVIZ_URL);
-                const text = await response.text();
-                
-                // Google GViz 回傳的 JSON 外面包了一層 callback 函數，需清洗乾淨
-                const jsonStr = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*);\s*$/)[1];
-                const jsonData = JSON.parse(jsonStr);
+                // 使用穩定無阻礙的公開轉址代理
+                const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(PUBHTML_URL);
+                const response = await fetch(proxyUrl);
+                const data = await response.json();
+                const htmlText = data.contents;
 
-                rawDatabase = parseGVizToDB(jsonData);
-                localStorage.setItem('cache_gviz_db', JSON.stringify(rawDatabase));
+                rawDatabase = parsePubHtmlToDB(htmlText);
+                localStorage.setItem('cache_pubhtml_db_v2', JSON.stringify(rawDatabase));
 
                 if (!isInitialized || document.getElementById('searchInput').value.trim() === "") {
                     isInitialized = true;
@@ -328,27 +325,30 @@
                 }
             } catch (error) {
                 if (!cachedData) {
-                    document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法載入試算表資料，請確認試算表已設為「知道連結的任何人都可以檢視」。</p>';
+                    document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法載入公開試算表資料，請確認網路連線或確認試算表已「發布到網路上」。</p>';
                 }
             }
         }
 
-        // 解析 Google GViz JSON 結構（可精準抓出儲存格帶有的超連結）
-        function parseGVizToDB(jsonData) {
-            const rows = jsonData.table.rows;
+        // 解析 PubHTML 表格結構（完美保留超連結與灰色純文字未上架狀態）
+        function parsePubHtmlToDB(htmlText) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(htmlText, 'text/html');
+            const table = doc.querySelector('table');
+            if (!table) return {};
+
+            const rows = table.querySelectorAll('tr');
             let database = {};
             let currentSeason = "";
             let daysOrder = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
             let dayColIndexes = {};
 
             rows.forEach(row => {
-                const cells = row.c;
-                if (!cells || cells.length === 0) return;
+                const cells = row.querySelectorAll('td, th');
+                if (cells.length === 0) return;
 
-                const firstCell = cells[0];
-                const firstCellText = firstCell && firstCell.v ? firstCell.v.toString().trim() : "";
+                const firstCellText = cells[0].textContent.trim();
 
-                // 檢查是否為季節標題列 (例如: 2026年冬番)
                 if (firstCellText.includes("年") && (firstCellText.includes("冬") || firstCellText.includes("春") || firstCellText.includes("夏") || firstCellText.includes("秋"))) {
                     currentSeason = firstCellText;
                     database[currentSeason] = { "星期日": [], "星期一": [], "星期二": [], "星期三": [], "星期四": [], "星期五": [], "星期六": [] };
@@ -356,10 +356,9 @@
                     return;
                 }
 
-                // 檢查是否為星期標題列 (星期日 ~ 星期六)
                 if (firstCellText === "星期日" && currentSeason) {
                     cells.forEach((cell, idx) => {
-                        const t = cell && cell.v ? cell.v.toString().trim() : "";
+                        const t = cell.textContent.trim();
                         if (daysOrder.includes(t)) {
                             dayColIndexes[idx] = t;
                         }
@@ -367,26 +366,20 @@
                     return;
                 }
 
-                // 讀取底下各週動漫資料
                 if (currentSeason && Object.keys(dayColIndexes).length > 0) {
                     cells.forEach((cell, idx) => {
-                        if (dayColIndexes[idx] && cell) {
+                        if (dayColIndexes[idx]) {
                             const dayName = dayColIndexes[idx];
-                            const text = cell.v ? cell.v.toString().trim() : "";
-                            // 抓取 Google 試算表內建的超連結 (p.s. 格式通常存在 cell.p.hyperlink 或 cell.link)
-                            let link = "";
-                            if (cell.p && cell.p.hyperlink) {
-                                link = cell.p.hyperlink;
-                            } else if (cell.link) {
-                                link = cell.link;
-                            }
+                            const text = cell.textContent.trim();
+                            const linkEl = cell.querySelector('a');
+                            const link = linkEl ? linkEl.href : "";
 
                             if (text && !daysOrder.includes(text) && text !== currentSeason) {
                                 const exists = database[currentSeason][dayName].some(item => item.title === text);
                                 if (!exists) {
                                     database[currentSeason][dayName].push({
                                         title: text,
-                                        link: link.includes('http') ? link : "" // 只有真的有填網址才會有 link，否則為空
+                                        link: link.includes('http') ? link : "" // 有連結抓連結，沒連結保持空字串（呈現灰色純文字）
                                     });
                                 }
                             }
@@ -448,7 +441,6 @@
                     const storageKey = `ep_${matchedSeasonName}_${safeKeyName}`;
                     const savedEp = localStorage.getItem(storageKey) || "";
                     
-                    // 如果有真實連結就變藍色可點擊，如果沒有連結就顯示普通文字
                     const titleHtml = anime.link 
                         ? `<a href="${anime.link}" target="_blank" class="anime-title" style="color:var(--accent-color);">${anime.title}</a>`
                         : `<span class="anime-title" style="color:var(--text-sub);">${anime.title}</span>`;
