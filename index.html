@@ -293,12 +293,14 @@
         let rawDatabase = {};
         let isInitialized = false;
 
-        // ⚡ 使用多重備援通道讀取，確保不卡住又能完美抓取超連結
+        // ⚡ 結合「瀏覽器快取 (秒開)」與「GViz API (完美抓超連結)」
         async function fetchSheetData() {
-            const PUBHTML_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRvFC-_oB0Zyx9TlXHUooKch9y6JFP1Ao4wncwqfSEGX17yUsgxk2wPtdyZVobOL7rpH1nuCIUR85D7/pubhtml?gid=795740724&single=true";
+            const SPREADSHEET_ID = "1EMr7cXnWwBoFAgLMjQVsY34B4hlFQ_YJFjidgLxBhPc";
+            const GID = "795740724";
+            const GVIZ_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?gid=${GID}&tqx=out:json`;
             
             // 1. 優先讀取瀏覽器快取，實現 0 秒秒開
-            const cachedData = localStorage.getItem('cache_pubhtml_db_v3');
+            const cachedData = localStorage.getItem('cache_gviz_perfect_db');
             if (cachedData) {
                 rawDatabase = JSON.parse(cachedData);
                 isInitialized = true;
@@ -307,31 +309,16 @@
                 document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: var(--text-sub);">正在載入資料...</p>';
             }
 
-            // 準備多個免費且穩定的公開代理，避免單一代理掛掉卡住
-            const proxies = [
-                "https://api.allorigins.win/get?url=" + encodeURIComponent(PUBHTML_URL),
-                "https://corsproxy.io/?" + encodeURIComponent(PUBHTML_URL)
-            ];
+            try {
+                const response = await fetch(GVIZ_URL);
+                const text = await response.text();
+                
+                // 清洗 Google GViz 的 JSON 回傳格式
+                const jsonStr = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*);\s*$/)[1];
+                const jsonData = JSON.parse(jsonStr);
 
-            let htmlText = "";
-            for (let proxyUrl of proxies) {
-                try {
-                    const response = await fetch(proxyUrl);
-                    if (proxyUrl.includes("allorigins")) {
-                        const data = await response.json();
-                        htmlText = data.contents;
-                    } else {
-                        htmlText = await response.text();
-                    }
-                    if (htmlText && htmlText.includes("table")) break;
-                } catch (e) {
-                    continue;
-                }
-            }
-
-            if (htmlText) {
-                rawDatabase = parsePubHtmlToDB(htmlText);
-                localStorage.setItem('cache_pubhtml_db_v3', JSON.stringify(rawDatabase));
+                rawDatabase = parseGVizToDB(jsonData);
+                localStorage.setItem('cache_gviz_perfect_db', JSON.stringify(rawDatabase));
 
                 if (!isInitialized || document.getElementById('searchInput').value.trim() === "") {
                     isInitialized = true;
@@ -339,29 +326,27 @@
                 } else if (document.getElementById('searchInput').value.trim() !== "") {
                     handleSearch();
                 }
-            } else if (!cachedData) {
-                document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法載入公開試算表資料，請確認試算表已「發布到網路上」。</p>';
+            } catch (error) {
+                if (!cachedData) {
+                    document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法載入試算表資料，請確認試算表已設為「知道連結的任何人都可以檢視」。</p>';
+                }
             }
         }
 
-        // 解析 PubHTML 表格結構（完整保留超連結與灰色未上架文字）
-        function parsePubHtmlToDB(htmlText) {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(htmlText, 'text/html');
-            const table = doc.querySelector('table');
-            if (!table) return {};
-
-            const rows = table.querySelectorAll('tr');
+        // 解析 GViz 結構：同時抓取文字與真正的超連結
+        function parseGVizToDB(jsonData) {
+            const rows = jsonData.table.rows;
             let database = {};
             let currentSeason = "";
             let daysOrder = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
             let dayColIndexes = {};
 
             rows.forEach(row => {
-                const cells = row.querySelectorAll('td, th');
-                if (cells.length === 0) return;
+                const cells = row.c;
+                if (!cells || cells.length === 0) return;
 
-                const firstCellText = cells[0].textContent.trim();
+                const firstCell = cells[0];
+                const firstCellText = firstCell && firstCell.v ? firstCell.v.toString().trim() : "";
 
                 if (firstCellText.includes("年") && (firstCellText.includes("冬") || firstCellText.includes("春") || firstCellText.includes("夏") || firstCellText.includes("秋"))) {
                     currentSeason = firstCellText;
@@ -372,7 +357,7 @@
 
                 if (firstCellText === "星期日" && currentSeason) {
                     cells.forEach((cell, idx) => {
-                        const t = cell.textContent.trim();
+                        const t = cell && cell.v ? cell.v.toString().trim() : "";
                         if (daysOrder.includes(t)) {
                             dayColIndexes[idx] = t;
                         }
@@ -382,18 +367,24 @@
 
                 if (currentSeason && Object.keys(dayColIndexes).length > 0) {
                     cells.forEach((cell, idx) => {
-                        if (dayColIndexes[idx]) {
+                        if (dayColIndexes[idx] && cell) {
                             const dayName = dayColIndexes[idx];
-                            const text = cell.textContent.trim();
-                            const linkEl = cell.querySelector('a');
-                            const link = linkEl ? linkEl.href : "";
+                            const text = cell.v ? cell.v.toString().trim() : "";
+                            
+                            // 抓取試算表儲存格內建的超連結
+                            let link = "";
+                            if (cell.p && cell.p.hyperlink) {
+                                link = cell.p.hyperlink;
+                            } else if (cell.link) {
+                                link = cell.link;
+                            }
 
                             if (text && !daysOrder.includes(text) && text !== currentSeason) {
                                 const exists = database[currentSeason][dayName].some(item => item.title === text);
                                 if (!exists) {
                                     database[currentSeason][dayName].push({
                                         title: text,
-                                        link: link.includes('http') ? link : ""
+                                        link: link.includes('http') ? link : "" // 有連結就放連結，沒連結保持空字串（顯示灰色純文字）
                                     });
                                 }
                             }
