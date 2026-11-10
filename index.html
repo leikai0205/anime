@@ -293,12 +293,14 @@
         let rawDatabase = {};
         let isInitialized = false;
 
-        // ⚡ 直接讀取 Google PubHTML 網頁（透過跨域代理以秒開呈現）
+        // ⚡ 直接透過 Google 試算表試算表 CSV 介面讀取（不需經過容易掛掉的外部 Proxy）
         async function fetchSheetData() {
-            const PUBHTML_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRvFC-_oB0Zyx9TlXHUooKch9y6JFP1Ao4wncwqfSEGX17yUsgxk2wPtdyZVobOL7rpH1nuCIUR85D7/pubhtml?gid=795740724&single=true";
+            const SPREADSHEET_ID = "1EMr7cXnWwBoFAgLMjQVsY34B4hlFQ_YJFjidgLxBhPc";
+            const GID = "795740724";
+            const CSV_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/export?format=csv&gid=${GID}`;
             
             // 1. 優先讀取瀏覽器快取，實現 0 秒秒開
-            const cachedData = localStorage.getItem('cache_pubhtml_db');
+            const cachedData = localStorage.getItem('cache_csv_db');
             if (cachedData) {
                 rawDatabase = JSON.parse(cachedData);
                 isInitialized = true;
@@ -308,13 +310,12 @@
             }
 
             try {
-                const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(PUBHTML_URL);
-                const response = await fetch(proxyUrl);
-                const data = await response.json();
-                const htmlText = data.contents;
+                const response = await fetch(CSV_URL);
+                if (!response.ok) throw new Error("Network response was not ok");
+                const csvText = await response.text();
 
-                rawDatabase = parsePubHtmlToDB(htmlText);
-                localStorage.setItem('cache_pubhtml_db', JSON.stringify(rawDatabase));
+                rawDatabase = parseCSVToDB(csvText);
+                localStorage.setItem('cache_csv_db', JSON.stringify(rawDatabase));
 
                 if (!isInitialized || document.getElementById('searchInput').value.trim() === "") {
                     isInitialized = true;
@@ -324,29 +325,56 @@
                 }
             } catch (error) {
                 if (!cachedData) {
-                    document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法載入公開試算表資料，請確認網路連線。</p>';
+                    document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法載入試算表資料，請確認試算表已設為「知道連結的任何人都可以檢視」。</p>';
                 }
             }
         }
 
-        // 解析 PubHTML 表格結構
-        function parsePubHtmlToDB(htmlText) {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(htmlText, 'text/html');
-            const table = doc.querySelector('table');
-            if (!table) return {};
+        // 解析 CSV 表格結構
+        function parseCSVToDB(csvText) {
+            // 簡易 CSV 解析器（支援雙引號包覆的欄位）
+            const rows = [];
+            let row = [];
+            let inQuotes = false;
+            let field = '';
+            
+            for (let i = 0; i < csvText.length; i++) {
+                let c = csvText[i];
+                let nextC = csvText[i + 1];
+                
+                if (c === '"') {
+                    if (inQuotes && nextC === '"') {
+                        field += '"';
+                        i++;
+                    } else {
+                        inQuotes = !inQuotes;
+                    }
+                } else if (c === ',' && !inQuotes) {
+                    row.push(field);
+                    field = '';
+                } else if ((c === '\r' && nextC === '\n') || (c === '\n' && !inQuotes)) {
+                    row.push(field);
+                    rows.push(row);
+                    row = [];
+                    field = '';
+                    if (c === '\r' && nextC === '\n') i++;
+                } else {
+                    field += c;
+                }
+            }
+            if (field || row.length > 0) {
+                row.push(field);
+                rows.push(row);
+            }
 
-            const rows = table.querySelectorAll('tr');
             let database = {};
             let currentSeason = "";
             let daysOrder = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
             let dayColIndexes = {};
 
-            rows.forEach(row => {
-                const cells = row.querySelectorAll('td, th');
+            rows.forEach(cells => {
                 if (cells.length === 0) return;
-
-                const firstCellText = cells[0].textContent.trim();
+                const firstCellText = cells[0].trim();
 
                 if (firstCellText.includes("年") && (firstCellText.includes("冬") || firstCellText.includes("春") || firstCellText.includes("夏") || firstCellText.includes("秋"))) {
                     currentSeason = firstCellText;
@@ -356,8 +384,8 @@
                 }
 
                 if (firstCellText === "星期日" && currentSeason) {
-                    cells.forEach((cell, idx) => {
-                        const t = cell.textContent.trim();
+                    cells.forEach((t, idx) => {
+                        t = t.trim();
                         if (daysOrder.includes(t)) {
                             dayColIndexes[idx] = t;
                         }
@@ -366,19 +394,18 @@
                 }
 
                 if (currentSeason && Object.keys(dayColIndexes).length > 0) {
-                    cells.forEach((cell, idx) => {
+                    cells.forEach((text, idx) => {
                         if (dayColIndexes[idx]) {
                             const dayName = dayColIndexes[idx];
-                            const text = cell.textContent.trim();
-                            const linkEl = cell.querySelector('a');
-                            const link = linkEl ? linkEl.href : "";
+                            text = text.trim();
 
                             if (text && !daysOrder.includes(text) && text !== currentSeason) {
+                                // 由於 CSV 無法直接抓到超連結網址，自動對應常見的 Anime1 搜尋或保持純文字
                                 const exists = database[currentSeason][dayName].some(item => item.title === text);
                                 if (!exists) {
                                     database[currentSeason][dayName].push({
                                         title: text,
-                                        link: link.includes('http') ? link : ""
+                                        link: `https://anime1.me/?s=${encodeURIComponent(text)}` // 自動補上 Anime1 搜尋連結
                                     });
                                 }
                             }
@@ -437,7 +464,6 @@
 
                 let htmlList = animeList.map((anime) => {
                     const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
-                    // 💡 以「季度 + 動漫名稱」作為永久 Key，不管換星期集數都不會消失
                     const storageKey = `ep_${matchedSeasonName}_${safeKeyName}`;
                     const savedEp = localStorage.getItem(storageKey) || "";
                     
@@ -514,7 +540,7 @@
                         
                         const titleHtml = anime.link 
                             ? `<a href="${anime.link}" target="_blank" class="anime-title">${anime.title}</a>`
-                            : `<span class="anime-title">${anime.title}</span>`;
+                            : `<span class="anime-title">${anime.title}</i>`;
 
                         return `
                             <div class="anime-item">
