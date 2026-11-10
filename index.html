@@ -293,14 +293,12 @@
         let rawDatabase = {};
         let isInitialized = false;
 
-        // ⚡ 使用穩定快速的 CSV 通道（零卡頓、秒開）
+        // ⚡ 透過你的 Google Apps Script 網頁 API 讀取（秒開、完美支援超連結與爬蟲資料）
         async function fetchSheetData() {
-            const SPREADSHEET_ID = "1EMr7cXnWwBoFAgLMjQVsY34B4hlFQ_YJFjidgLxBhPc";
-            const GID = "795740724";
-            const CSV_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/export?format=csv&gid=${GID}`;
+            const GAS_API_URL = "https://script.google.com/macros/s/AKfycbxDVeHWef6lwyEPUYavbJIGppFaJFL5IcirCcpoX1rifNDJD9WP4opQZnYvMGHnixQS/exec"; 
             
             // 1. 優先讀取瀏覽器快取，實現 0 秒秒開
-            const cachedData = localStorage.getItem('cache_csv_db_v2');
+            const cachedData = localStorage.getItem('cache_gas_api_db_v1');
             if (cachedData) {
                 rawDatabase = JSON.parse(cachedData);
                 isInitialized = true;
@@ -310,12 +308,12 @@
             }
 
             try {
-                const response = await fetch(CSV_URL);
+                const response = await fetch(GAS_API_URL);
                 if (!response.ok) throw new Error("Network response was not ok");
-                const csvText = await response.text();
+                const jsonData = await response.json();
 
-                rawDatabase = parseCSVToDB(csvText);
-                localStorage.setItem('cache_csv_db_v2', JSON.stringify(rawDatabase));
+                rawDatabase = jsonData;
+                localStorage.setItem('cache_gas_api_db_v1', JSON.stringify(rawDatabase));
 
                 if (!isInitialized || document.getElementById('searchInput').value.trim() === "") {
                     isInitialized = true;
@@ -325,107 +323,9 @@
                 }
             } catch (error) {
                 if (!cachedData) {
-                    document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法載入試算表資料，請確認試算表已設為「知道連結的任何人都可以檢視」。</p>';
+                    document.getElementById('animeContainer').innerHTML = '<p style="text-align: center; color: #ef4444; grid-column: 1/-1;">無法載入 API 資料，請確認網路連線正常。</p>';
                 }
             }
-        }
-
-        // 解析 CSV 表格結構（完美支援：有填網址抓網址，沒填網址維持純文字）
-        function parseCSVToDB(csvText) {
-            const rows = [];
-            let row = [];
-            let inQuotes = false;
-            let field = '';
-            
-            for (let i = 0; i < csvText.length; i++) {
-                let c = csvText[i];
-                let nextC = csvText[i + 1];
-                
-                if (c === '"') {
-                    if (inQuotes && nextC === '"') {
-                        field += '"';
-                        i++;
-                    } else {
-                        inQuotes = !inQuotes;
-                    }
-                } else if (c === ',' && !inQuotes) {
-                    row.push(field);
-                    field = '';
-                } else if ((c === '\r' && nextC === '\n') || (c === '\n' && !inQuotes)) {
-                    row.push(field);
-                    rows.push(row);
-                    row = [];
-                    field = '';
-                    if (c === '\r' && nextC === '\n') i++;
-                } else {
-                    field += c;
-                }
-            }
-            if (field || row.length > 0) {
-                row.push(field);
-                rows.push(row);
-            }
-
-            let database = {};
-            let currentSeason = "";
-            let daysOrder = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
-            let dayColIndexes = {};
-
-            rows.forEach(cells => {
-                if (cells.length === 0) return;
-                const firstCellText = cells[0].trim();
-
-                if (firstCellText.includes("年") && (firstCellText.includes("冬") || firstCellText.includes("春") || firstCellText.includes("夏") || firstCellText.includes("秋"))) {
-                    currentSeason = firstCellText;
-                    database[currentSeason] = { "星期日": [], "星期一": [], "星期二": [], "星期三": [], "星期四": [], "星期五": [], "星期六": [] };
-                    dayColIndexes = {};
-                    return;
-                }
-
-                if (firstCellText === "星期日" && currentSeason) {
-                    cells.forEach((t, idx) => {
-                        t = t.trim();
-                        if (daysOrder.includes(t)) {
-                            dayColIndexes[idx] = t;
-                        }
-                    });
-                    return;
-                }
-
-                if (currentSeason && Object.keys(dayColIndexes).length > 0) {
-                    cells.forEach((text, idx) => {
-                        if (dayColIndexes[idx]) {
-                            const dayName = dayColIndexes[idx];
-                            text = text.trim();
-
-                            if (text && !daysOrder.includes(text) && text !== currentSeason) {
-                                const exists = database[currentSeason][dayName].some(item => item.title === text);
-                                if (!exists) {
-                                    // 💡 智慧判斷：如果你的儲存格內容本身就是 http 開頭的網址，我們把它當作 link；
-                                    // 或者是你在試算表有另外處理。目前最穩定的方式是：
-                                    // 如果 text 包含 http，它就是連結；否則它就是純0動漫名稱，link 留空！
-                                    let animeTitle = text;
-                                    let animeLink = "";
-
-                                    if (text.startsWith("http://") || text.startsWith("https://")) {
-                                        // 如果格子裡直接貼了網址（看你平常習慣怎麼放，通常動漫名稱是純文字）
-                                        // 如果你平常是動漫名稱，這裡會直接顯示純文字
-                                    }
-
-                                    // 如果你希望在 Google 試算表裡面有放網址，我們可以在這裡對應。
-                                    // 目前先設定：只要沒有網址，link 就維持空字串（顯示銀灰色純文字）
-                                    database[currentSeason][dayName].push({
-                                        title: animeTitle,
-                                        link: animeLink
-                                    });
-                                }
-                            }
-                        }
-                    });
-                }
-            });
-
-            return database;
         }
 
         function handleControlChange() {
@@ -545,7 +445,7 @@
                     resultsDiv.style.marginBottom = "20px";
 
                     let htmlList = matchedItems.map(anime => {
-                        const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_" );
+                        const safeKeyName = anime.title.replace(/[^\w\u4e00-\u9fa5]/g, "_");
                         const storageKey = `ep_${seasonName}_${safeKeyName}`;
                         const savedEp = localStorage.getItem(storageKey) || "";
                         
